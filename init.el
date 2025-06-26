@@ -186,6 +186,7 @@
   ;;  ;; TODO:
   ;;  ;; ("C-c C-c r" . #'my-reload-emacs-configuration)
   ;;  )
+  (server-start)
   )
 
 
@@ -370,11 +371,11 @@
     ("F" find-file-other-window "other file")
     ("v" (progn (split-window-right) (windmove-right)))
     ("o" delete-other-windows :color blue)
-    ("a" ace-window)
-    ("s" ace-swap-window)
+    ;; ("a" ace-window)
+    ;; ("s" ace-swap-window)
     ("d" delete-window "delete")
-    ("D" ace-delete-window "ace delete")
-    ("i" ace-maximize-window "maximize")
+    ;; ("D" ace-delete-window "ace delete")
+    ;; ("i" ace-maximize-window "maximize")
     ("q" nil))
   (defhydra my-shortcuts (:exit t)
     ("s" save-buffer "Save")
@@ -894,20 +895,20 @@ cancel the use of the current buffer (for special-purpose buffers)."
 ;;; Paren matching
 ;; Show Off-screen matches
 (use-package paren
-  :preface
-  (defun display-line-overlay+ (pos str &optional face)
-    "Display line at POS as STR with FACE.
+  ;; :preface
+  ;; (defun display-line-overlay+ (pos str &optional face)
+  ;;   "Display line at POS as STR with FACE.
 
-  FACE defaults to inheriting from default and highlight."
-    (let ((ol (save-excursion
-                (goto-char (window-start))
-                (make-overlay (line-beginning-position)
-                              (line-end-position)))))
-      (overlay-put ol 'window (get-buffer-window))
-      (overlay-put ol 'display str)
-      (overlay-put ol 'face
-                   (or face '(:inherit default :inherit show-paren-match)))
-      ol))
+  ;; FACE defaults to inheriting from default and highlight."
+  ;;   (let ((ol (save-excursion
+  ;;               (goto-char (window-start))
+  ;;               (make-overlay (line-beginning-position)
+  ;;                             (line-end-position)))))
+  ;;     (overlay-put ol 'window (get-buffer-window))
+  ;;     (overlay-put ol 'display str)
+  ;;     (overlay-put ol 'face
+  ;;                  (or face '(:inherit default :inherit show-paren-match)))
+  ;;     ol))
   :custom
   (show-paren-delay 0.3)
   :config
@@ -918,37 +919,38 @@ cancel the use of the current buffer (for special-purpose buffers)."
 
   ;; this still needs to be set for `blink-matching-open` to work
   (setq blink-matching-paren t)
-  (let ((ov nil))                       ; keep track of the overlay
-    (advice-add
-     #'show-paren-function
-     :after
-     (defun show-paren--off-screen+ (&rest _args)
-       "Display matching line for off-screen paren."
-       (when (overlayp ov)
-         (delete-overlay ov))
-       ;; check if it's appropriate to show match info,
-       ;; see `blink-paren-post-self-insert-function'
-       (when (and (overlay-buffer show-paren--overlay)
-                  (not (or cursor-in-echo-area
-                           executing-kbd-macro
-                           noninteractive
-                           (minibufferp)
-                           this-command))
-                  (and (not (bobp))
-                       (memq (char-syntax (char-before)) '(?\) ?\$)))
-                  (= 1 (logand 1 (- (point)
-                                    (save-excursion
-                                      (forward-char -1)
-                                      (skip-syntax-backward "/\\")
-                                      (point))))))
-         ;; rebind `minibuffer-message' called by
-         ;; `blink-matching-open' to handle the overlay display
-         (cl-letf (((symbol-function #'minibuffer-message)
-                    (lambda (msg &rest args)
-                      (let ((msg (apply #'format-message msg args)))
-                        (setq ov (display-line-overlay+
-                                  (window-start) msg))))))
-           (blink-matching-open)))))))
+  ;; (let ((ov nil))                       ; keep track of the overlay
+  ;;   (advice-add
+  ;;    #'show-paren-function
+  ;;    :after
+  ;;    (defun show-paren--off-screen+ (&rest _args)
+  ;;      "Display matching line for off-screen paren."
+  ;;      (when (overlayp ov)
+  ;;        (delete-overlay ov))
+  ;;      ;; check if it's appropriate to show match info,
+  ;;      ;; see `blink-paren-post-self-insert-function'
+  ;;      (when (and (overlay-buffer show-paren--overlay)
+  ;;                 (not (or cursor-in-echo-area
+  ;;                          executing-kbd-macro
+  ;;                          noninteractive
+  ;;                          (minibufferp)
+  ;;                          this-command))
+  ;;                 (and (not (bobp))
+  ;;                      (memq (char-syntax (char-before)) '(?\) ?\$)))
+  ;;                 (= 1 (logand 1 (- (point)
+  ;;                                   (save-excursion
+  ;;                                     (forward-char -1)
+  ;;                                     (skip-syntax-backward "/\\")
+  ;;                                     (point))))))
+  ;;        ;; rebind `minibuffer-message' called by
+  ;;        ;; `blink-matching-open' to handle the overlay display
+  ;;        (cl-letf (((symbol-function #'minibuffer-message)
+  ;;                   (lambda (msg &rest args)
+  ;;                     (let ((msg (apply #'format-message msg args)))
+  ;;                       (setq ov (display-line-overlay+
+  ;;                                 (window-start) msg))))))
+  ;;          (blink-matching-open))))))
+  )
 
 (use-package emacs
   :config
@@ -1023,24 +1025,6 @@ ORIG is the advised function, which is called with its ARGS."
 
   ;; If a popup does happen, don't resize windows to be equal-sized
   (setq even-window-sizes nil))
-
-;; (use-package winum
-;;   :bind (:map winum-keymap
-;; 	      ("C-`" . 'winum-select-window-by-number)
-;; 	      ("C-²" . 'winum-select-window-by-number)
-;; 	      ("M-0" . 'winum-select-window-0-or-10)
-;; 	      ("M-1" . 'winum-select-window-1)
-;; 	      ("M-2" . 'winum-select-window-2)
-;; 	      ("M-3" . 'winum-select-window-3)
-;; 	      ("M-4" . 'winum-select-window-4)
-;; 	      ("M-5" . 'winum-select-window-5)
-;; 	      ("M-6" . 'winum-select-window-6)
-;; 	      ("M-7" . 'winum-select-window-7)
-;; 	      ("M-8" . 'winum-select-window-8)
-;; 	      ("M-9" . 'winum-select-window-9))
-;;   :config
-;;   (setq winum-auto-setup-mode-line nil)
-;;   (winum-mode))
 
 ;; TODO: See if required
 ;; (defun zap-to-isearch (rbeg rend)
@@ -1186,13 +1170,34 @@ ORIG is the advised function, which is called with its ARGS."
 
 ;;; Ace-window
 ;; package for selecting a window to switch to
-(use-package ace-window
-  :defer t)
+;; (use-package ace-window
+;;   :defer t
+;;   :init
+;;   (ace-window-display-mode))
+
+;; Winum mode
+(use-package winum
+  :bind (:map winum-keymap
+	      ("C-`" . 'winum-select-window-by-number)
+	      ("C-²" . 'winum-select-window-by-number)
+	      ("M-0" . 'winum-select-window-0-or-10)
+	      ("M-1" . 'winum-select-window-1)
+	      ("M-2" . 'winum-select-window-2)
+	      ("M-3" . 'winum-select-window-3)
+	      ("M-4" . 'winum-select-window-4)
+	      ("M-5" . 'winum-select-window-5)
+	      ("M-6" . 'winum-select-window-6)
+	      ("M-7" . 'winum-select-window-7)
+	      ("M-8" . 'winum-select-window-8)
+	      ("M-9" . 'winum-select-window-9))
+  :config
+  (setq winum-auto-setup-mode-line nil)
+  (winum-mode))
 
 ;;; Window management
 (use-package emacs
   :bind
-  (("M-o" . #'ace-window))
+  (("M-o" . #'other-window))
   :config
   (defvar-keymap may/windmove-keys
     :repeat t
@@ -1325,10 +1330,10 @@ ORIG is the advised function, which is called with its ARGS."
 
 (use-package git-gutter-fringe
   :config
-  (define-fringe-bitmap 'git-gutter-fr:added [224] nil nil '(center repeated))
-  (define-fringe-bitmap 'git-gutter-fr:modified [224] nil nil '(center repeated))
+  (define-fringe-bitmap 'git-gutter-fr:added [224] nil nil               '(center repeated))
+  (define-fringe-bitmap 'git-gutter-fr:modified [224] nil nil            '(center repeated))
   (define-fringe-bitmap 'git-gutter-fr:deleted [128 192 224 240] nil nil 'bottom)
-  (set-face-foreground 'git-gutter-fr:modified "orange1"))
+  (set-face-foreground  'git-gutter-fr:modified "orange1"))
 
 
 ;;;;;; Setup EVIL
@@ -1338,16 +1343,17 @@ ORIG is the advised function, which is called with its ARGS."
 ;;   (setq evil-want-integration t)
 ;;   (setq evil-want-keybinding nil)
 ;;   :config
-;;   (setq evil-emacs-state-cursor `(,(modus-themes-get-color-value 'bg-graph-blue-0) (bar . 3))
-;;         evil-normal-state-cursor `(,(modus-themes-get-color-value 'fg-lavender) (bar . 3))
-;;         evil-visual-state-cursor `(,(modus-themes-get-color-value 'bg-lavender) (bar . 3))
-;;         evil-insert-state-cursor `(,(modus-themes-get-color-value 'bg-graph-green-1) (bar . 3))
-;;         evil-cross-lines t
-;;         evil-want-fine-undo t
-;;         ;; cursor-related `evil-mode' settings
-;;         evil-move-cursor-back nil
-;;         evil-move-beyond-eol t
-;;         evil-highlight-closing-paren-at-point-states nil)
+;;   (setq
+;;    ;; evil-emacs-state-cursor `(,(modus-themes-get-color-value 'bg-graph-blue-0) (bar . 3))
+;;    ;; evil-normal-state-cursor `(,(modus-themes-get-color-value 'fg-lavender) (bar . 3))
+;;    ;; evil-visual-state-cursor `(,(modus-themes-get-color-value 'bg-lavender) (bar . 3))
+;;    ;; evil-insert-state-cursor `(,(modus-themes-get-color-value 'bg-graph-green-1) (bar . 3))
+;;    evil-cross-lines t
+;;    evil-want-fine-undo t
+;;    ;; cursor-related `evil-mode' settings
+;;    evil-move-cursor-back nil
+;;    evil-move-beyond-eol t
+;;    evil-highlight-closing-paren-at-point-states nil)
 ;;   (evil-set-undo-system 'undo-tree)
 ;;   (dolist (mode '(acl2-doc-mode
 ;;                   eshell-mode
@@ -1357,8 +1363,8 @@ ORIG is the advised function, which is called with its ARGS."
 ;;   (dolist (mode '(message-buffer-mode))
 ;;     (evil-set-initial-state mode 'normal))
 
-;;   (advice-add 'evil-paste-after :override #'my/evil-paste-after)
-;;   (advice-add 'evil-paste-before :override #'my/evil-paste-before)
+;;   ;; (advice-add 'evil-paste-after :override #'my/evil-paste-after)
+;;   ;; (advice-add 'evil-paste-before :override #'my/evil-paste-before)
 
 ;;   (setq evil-mode-line-format '(before . mode-line-front-space))
 
@@ -1382,396 +1388,491 @@ ORIG is the advised function, which is called with its ARGS."
 ;;                                     :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))))
 
 
-;;   (defun evil-mouse-start-end (start end mode)
-;;     "Return a list of region bounds based on START and END according to MODE.
-;; If MODE is not 1 then set point to (min START END), mark to (max
-;; START END).  If MODE is 1 then set point to start of word at (min
-;; START END), mark to end of word at (max START END)."
-;;     (evil-sort start end)
-;;     (setq mode (mod mode 4))
-;;     (if (/= mode 1) (list start end)
-;;       (list
-;;        (save-excursion
-;;          (goto-char (min (point-max) (1+ start)))
-;;          (if (zerop (forward-thing evil-mouse-word -1))
-;;              (let ((bpnt (point)))
-;;                (forward-thing evil-mouse-word +1)
-;;                (if (> (point) start) bpnt (point)))
-;;            (point-min)))
-;;        (save-excursion
-;;          (goto-char end)
-;;          (if (zerop (forward-thing evil-mouse-word +1))
-;;              (let ((epnt (point)))
-;;                (forward-thing evil-mouse-word -1)
-;;                (if (<= (point) end) epnt (point)))
-;;            (point-max))))))
+;; ;;   (defun evil-mouse-start-end (start end mode)
+;; ;;     "Return a list of region bounds based on START and END according to MODE.
+;; ;; If MODE is not 1 then set point to (min START END), mark to (max
+;; ;; START END).  If MODE is 1 then set point to start of word at (min
+;; ;; START END), mark to end of word at (max START END)."
+;; ;;     (evil-sort start end)
+;; ;;     (setq mode (mod mode 4))
+;; ;;     (if (/= mode 1) (list start end)
+;; ;;       (list
+;; ;;        (save-excursion
+;; ;;          (goto-char (min (point-max) (1+ start)))
+;; ;;          (if (zerop (forward-thing evil-mouse-word -1))
+;; ;;              (let ((bpnt (point)))
+;; ;;                (forward-thing evil-mouse-word +1)
+;; ;;                (if (> (point) start) bpnt (point)))
+;; ;;            (point-min)))
+;; ;;        (save-excursion
+;; ;;          (goto-char end)
+;; ;;          (if (zerop (forward-thing evil-mouse-word +1))
+;; ;;              (let ((epnt (point)))
+;; ;;                (forward-thing evil-mouse-word -1)
+;; ;;                (if (<= (point) end) epnt (point)))
+;; ;;            (point-max))))))
   
-;;   ;; make `evil-jump-item' move point just after matching delimeter if it jumps forward
-;;   (evil-define-motion evil-jump-item-before (count)
-;;     "Find the next item in this line immediately before
-;; or somewhere after the cursor and jump to the corresponding one."
-;;     :jump t
-;;     :type inclusive
-;;     (let ((pos (point)))
-;;       (unless (or (bolp) (bobp)) (backward-char))
-;;       (condition-case nil
-;;           (evil-jump-item count)
-;;         ('user-error (goto-char pos)))
-;;       (unless (< (point) pos)
-;;         (goto-char pos)
-;;         (evil-jump-item count)
-;;         (when (> (point) pos) (forward-char)))))
+;; ;;   ;; make `evil-jump-item' move point just after matching delimeter if it jumps forward
+;; ;;   (evil-define-motion evil-jump-item-before (count)
+;; ;;     "Find the next item in this line immediately before
+;; ;; or somewhere after the cursor and jump to the corresponding one."
+;; ;;     :jump t
+;; ;;     :type inclusive
+;; ;;     (let ((pos (point)))
+;; ;;       (unless (or (bolp) (bobp)) (backward-char))
+;; ;;       (condition-case nil
+;; ;;           (evil-jump-item count)
+;; ;;         ('user-error (goto-char pos)))
+;; ;;       (unless (< (point) pos)
+;; ;;         (goto-char pos)
+;; ;;         (evil-jump-item count)
+;; ;;         (when (> (point) pos) (forward-char)))))
   
-;;   (defun evil-yank-line-handler (text)
-;;     "Insert the current text linewise."
-;;     (let ((text (apply #'concat (make-list (or evil-paste-count 1) text)))
-;;           (opoint (point)))
-;;       (evil-remove-yank-excluded-properties text)
-;;       (cond
-;;        ((eq this-command 'evil-paste-before)
-;;         (let ((col (current-column)))
-;;           (evil-move-beginning-of-line)
-;;           (let ((beg (point)))
-;;             (insert text)
-;;             (setq evil-last-paste
-;;                   (list 'evil-paste-before evil-paste-count opoint beg (point)))
-;;             (evil-set-marker ?\[ beg)
-;;             (evil-set-marker ?\] (1- (point)))
-;;             (move-to-column col t))))
-;;        ((eq this-command 'evil-paste-after)
-;;         (evil-move-end-of-line)
-;;         (let ((beg (point)))
-;;           (insert "\n")
-;;           (insert text)
-;;           (delete-char -1)              ; delete the last newline
-;;           (setq evil-last-paste
-;;                 (list 'evil-paste-after evil-paste-count opoint beg (point)))
-;;           (evil-set-marker ?\[ (1+ beg))
-;;           (evil-set-marker ?\] (point))
-;;           (unless evil--cursor-after
-;;             (goto-char (1+ beg))))
-;;         (back-to-indentation))
-;;        (t (insert text)))))
+;; ;;   (defun evil-yank-line-handler (text)
+;; ;;     "Insert the current text linewise."
+;; ;;     (let ((text (apply #'concat (make-list (or evil-paste-count 1) text)))
+;; ;;           (opoint (point)))
+;; ;;       (evil-remove-yank-excluded-properties text)
+;; ;;       (cond
+;; ;;        ((eq this-command 'evil-paste-before)
+;; ;;         (let ((col (current-column)))
+;; ;;           (evil-move-beginning-of-line)
+;; ;;           (let ((beg (point)))
+;; ;;             (insert text)
+;; ;;             (setq evil-last-paste
+;; ;;                   (list 'evil-paste-before evil-paste-count opoint beg (point)))
+;; ;;             (evil-set-marker ?\[ beg)
+;; ;;             (evil-set-marker ?\] (1- (point)))
+;; ;;             (move-to-column col t))))
+;; ;;        ((eq this-command 'evil-paste-after)
+;; ;;         (evil-move-end-of-line)
+;; ;;         (let ((beg (point)))
+;; ;;           (insert "\n")
+;; ;;           (insert text)
+;; ;;           (delete-char -1)              ; delete the last newline
+;; ;;           (setq evil-last-paste
+;; ;;                 (list 'evil-paste-after evil-paste-count opoint beg (point)))
+;; ;;           (evil-set-marker ?\[ (1+ beg))
+;; ;;           (evil-set-marker ?\] (point))
+;; ;;           (unless evil--cursor-after
+;; ;;             (goto-char (1+ beg))))
+;; ;;         (back-to-indentation))
+;; ;;        (t (insert text)))))
 
-;;   (evil-define-command my/evil-paste-before
-;;     (count &optional register yank-handler)
-;;     "Paste the latest yanked text behind point.
-;; The return value is the yanked text."
-;;     :suppress-operator t
-;;     (interactive "*P<x>")
-;;     (setq count (prefix-numeric-value count))
-;;     (if (evil-visual-state-p)
-;;         (evil-visual-paste count register)
-;;       (evil-with-undo
-;;         (let* ((text (copy-sequence
-;;                       (if register
-;;                           (evil-get-register register)
-;;                         (current-kill 0))))
-;;                (yank-handler (or yank-handler
-;;                                  (when (stringp text)
-;;                                    (car-safe (get-text-property
-;;                                               0 'yank-handler text)))))
-;;                (opoint (point)))
-;;           (when text
-;;             (if (functionp yank-handler)
-;;                 (let* ((evil-paste-count count)
-;;                        ;; for non-interactive use
-;;                        (this-command #'evil-paste-before))
-;;                   (insert-for-yank text))
-;;               ;; no yank-handler, default
-;;               (when (vectorp text)
-;;                 (setq text (evil-vector-to-string text)))
-;;               (set-text-properties 0 (length text) nil text)
-;;               ;; (unless (eolp) (forward-char))
-;;               (push-mark (point) t)
-;;               ;; TODO: Perhaps it is better to collect a list of all
-;;               ;; (point . mark) pairs to undo the yanking for COUNT > 1.
-;;               ;; The reason is that this yanking could very well use
-;;               ;; `yank-handler'.
-;;               (let ((beg (point)))
-;;                 (dotimes (_ (or count 1))
-;;                   (insert-for-yank text))
-;;                 (setq evil-last-paste
-;;                       (list #'evil-paste-after
-;;                             count
-;;                             opoint
-;;                             beg         ; beg
-;;                             (point)))   ; end
-;;                 (evil-set-marker ?\[ beg)
-;;                 (evil-set-marker ?\] (1- (point)))
-;;                 (when (evil-normal-state-p)
-;;                   (evil-move-cursor-back)))))
-;;           (when evil--cursor-after
-;;             (if (eq 'evil-yank-line-handler yank-handler)
-;;                 (ignore-errors (evil-next-line-first-non-blank 1))
-;;               (evil-forward-char 1 nil t))
-;;             (setq evil--cursor-after nil))
-;;           (when register
-;;             (setq evil-last-paste nil))
-;;           (and (> (length text) 0) text)))))
+;; ;;   (evil-define-command my/evil-paste-before
+;; ;;     (count &optional register yank-handler)
+;; ;;     "Paste the latest yanked text behind point.
+;; ;; The return value is the yanked text."
+;; ;;     :suppress-operator t
+;; ;;     (interactive "*P<x>")
+;; ;;     (setq count (prefix-numeric-value count))
+;; ;;     (if (evil-visual-state-p)
+;; ;;         (evil-visual-paste count register)
+;; ;;       (evil-with-undo
+;; ;;         (let* ((text (copy-sequence
+;; ;;                       (if register
+;; ;;                           (evil-get-register register)
+;; ;;                         (current-kill 0))))
+;; ;;                (yank-handler (or yank-handler
+;; ;;                                  (when (stringp text)
+;; ;;                                    (car-safe (get-text-property
+;; ;;                                               0 'yank-handler text)))))
+;; ;;                (opoint (point)))
+;; ;;           (when text
+;; ;;             (if (functionp yank-handler)
+;; ;;                 (let* ((evil-paste-count count)
+;; ;;                        ;; for non-interactive use
+;; ;;                        (this-command #'evil-paste-before))
+;; ;;                   (insert-for-yank text))
+;; ;;               ;; no yank-handler, default
+;; ;;               (when (vectorp text)
+;; ;;                 (setq text (evil-vector-to-string text)))
+;; ;;               (set-text-properties 0 (length text) nil text)
+;; ;;               ;; (unless (eolp) (forward-char))
+;; ;;               (push-mark (point) t)
+;; ;;               ;; TODO: Perhaps it is better to collect a list of all
+;; ;;               ;; (point . mark) pairs to undo the yanking for COUNT > 1.
+;; ;;               ;; The reason is that this yanking could very well use
+;; ;;               ;; `yank-handler'.
+;; ;;               (let ((beg (point)))
+;; ;;                 (dotimes (_ (or count 1))
+;; ;;                   (insert-for-yank text))
+;; ;;                 (setq evil-last-paste
+;; ;;                       (list #'evil-paste-after
+;; ;;                             count
+;; ;;                             opoint
+;; ;;                             beg         ; beg
+;; ;;                             (point)))   ; end
+;; ;;                 (evil-set-marker ?\[ beg)
+;; ;;                 (evil-set-marker ?\] (1- (point)))
+;; ;;                 (when (evil-normal-state-p)
+;; ;;                   (evil-move-cursor-back)))))
+;; ;;           (when evil--cursor-after
+;; ;;             (if (eq 'evil-yank-line-handler yank-handler)
+;; ;;                 (ignore-errors (evil-next-line-first-non-blank 1))
+;; ;;               (evil-forward-char 1 nil t))
+;; ;;             (setq evil--cursor-after nil))
+;; ;;           (when register
+;; ;;             (setq evil-last-paste nil))
+;; ;;           (and (> (length text) 0) text)))))
   
-;;   (evil-define-command my/evil-paste-before
-;;     (count &optional register yank-handler)
-;;     "Paste the latest yanked text behind point.
-;; The return value is the yanked text."
-;;     :suppress-operator t
-;;     (interactive "*P<x>")
-;;     (setq count (prefix-numeric-value count))
-;;     (if (evil-visual-state-p)
-;;         (evil-visual-paste count register)
-;;       (evil-with-undo
-;;         (let* ((text (copy-sequence
-;;                       (if register
-;;                           (evil-get-register register)
-;;                         (current-kill 0))))
-;;                (yank-handler (or yank-handler
-;;                                  (when (stringp text)
-;;                                    (car-safe (get-text-property
-;;                                               0 'yank-handler text)))))
-;;                (opoint (point)))
-;;           (when text
-;;             (if (functionp yank-handler)
-;;                 (let* ((evil-paste-count count)
-;;                        ;; for non-interactive use
-;;                        (this-command #'evil-paste-before))
-;;                   (insert-for-yank text))
-;;               ;; no yank-handler, default
-;;               (when (vectorp text)
-;;                 (setq text (evil-vector-to-string text)))
-;;               (set-text-properties 0 (length text) nil text)
-;;               ;; (unless (eolp) (forward-char))
-;;               (push-mark (point) t)
-;;               ;; TODO: Perhaps it is better to collect a list of all
-;;               ;; (point . mark) pairs to undo the yanking for COUNT > 1.
-;;               ;; The reason is that this yanking could very well use
-;;               ;; `yank-handler'.
-;;               (let ((beg (point)))
-;;                 (dotimes (_ (or count 1))
-;;                   (insert-for-yank text))
-;;                 (setq evil-last-paste
-;;                       (list #'evil-paste-after
-;;                             count
-;;                             opoint
-;;                             beg         ; beg
-;;                             (point)))   ; end
-;;                 (evil-set-marker ?\[ beg)
-;;                 (evil-set-marker ?\] (1- (point)))
-;;                 (when (evil-normal-state-p)
-;;                   (evil-move-cursor-back)))))
-;;           (when evil--cursor-after
-;;             (if (eq 'evil-yank-line-handler yank-handler)
-;;                 (ignore-errors (evil-next-line-first-non-blank 1))
-;;               (evil-forward-char 1 nil t))
-;;             (setq evil--cursor-after nil))
-;;           (when register
-;;             (setq evil-last-paste nil))
-;;           (and (> (length text) 0) text)))))
+;; ;;   (evil-define-command my/evil-paste-before
+;; ;;     (count &optional register yank-handler)
+;; ;;     "Paste the latest yanked text behind point.
+;; ;; The return value is the yanked text."
+;; ;;     :suppress-operator t
+;; ;;     (interactive "*P<x>")
+;; ;;     (setq count (prefix-numeric-value count))
+;; ;;     (if (evil-visual-state-p)
+;; ;;         (evil-visual-paste count register)
+;; ;;       (evil-with-undo
+;; ;;         (let* ((text (copy-sequence
+;; ;;                       (if register
+;; ;;                           (evil-get-register register)
+;; ;;                         (current-kill 0))))
+;; ;;                (yank-handler (or yank-handler
+;; ;;                                  (when (stringp text)
+;; ;;                                    (car-safe (get-text-property
+;; ;;                                               0 'yank-handler text)))))
+;; ;;                (opoint (point)))
+;; ;;           (when text
+;; ;;             (if (functionp yank-handler)
+;; ;;                 (let* ((evil-paste-count count)
+;; ;;                        ;; for non-interactive use
+;; ;;                        (this-command #'evil-paste-before))
+;; ;;                   (insert-for-yank text))
+;; ;;               ;; no yank-handler, default
+;; ;;               (when (vectorp text)
+;; ;;                 (setq text (evil-vector-to-string text)))
+;; ;;               (set-text-properties 0 (length text) nil text)
+;; ;;               ;; (unless (eolp) (forward-char))
+;; ;;               (push-mark (point) t)
+;; ;;               ;; TODO: Perhaps it is better to collect a list of all
+;; ;;               ;; (point . mark) pairs to undo the yanking for COUNT > 1.
+;; ;;               ;; The reason is that this yanking could very well use
+;; ;;               ;; `yank-handler'.
+;; ;;               (let ((beg (point)))
+;; ;;                 (dotimes (_ (or count 1))
+;; ;;                   (insert-for-yank text))
+;; ;;                 (setq evil-last-paste
+;; ;;                       (list #'evil-paste-after
+;; ;;                             count
+;; ;;                             opoint
+;; ;;                             beg         ; beg
+;; ;;                             (point)))   ; end
+;; ;;                 (evil-set-marker ?\[ beg)
+;; ;;                 (evil-set-marker ?\] (1- (point)))
+;; ;;                 (when (evil-normal-state-p)
+;; ;;                   (evil-move-cursor-back)))))
+;; ;;           (when evil--cursor-after
+;; ;;             (if (eq 'evil-yank-line-handler yank-handler)
+;; ;;                 (ignore-errors (evil-next-line-first-non-blank 1))
+;; ;;               (evil-forward-char 1 nil t))
+;; ;;             (setq evil--cursor-after nil))
+;; ;;           (when register
+;; ;;             (setq evil-last-paste nil))
+;; ;;           (and (> (length text) 0) text)))))
 
-;;   (evil-define-command my/evil-paste-after
-;;     (count &optional register yank-handler)
-;;     "Paste the latest yanked text before the cursor position.
-;; The return value is the yanked text."
-;;     :suppress-operator t
-;;     (interactive "*P<x>")
-;;     (setq count (prefix-numeric-value count))
-;;     (if (evil-visual-state-p)
-;;         ;; This is the only difference with evil-paste-after in visual-state
-;;         (let ((evil-kill-on-visual-paste (not evil-kill-on-visual-paste)))
-;;           (evil-visual-paste count register))
-;;       (evil-with-undo
-;;         (let* ((text (copy-sequence
-;;                       (if register
-;;                           (evil-get-register register)
-;;                         (current-kill 0))))
-;;                (yank-handler (or yank-handler
-;;                                  (when (stringp text)
-;;                                    (car-safe (get-text-property
-;;                                               0 'yank-handler text)))))
-;;                (opoint (point)))
-;;           (when evil-paste-clear-minibuffer-first
-;;             (delete-minibuffer-contents)
-;;             (setq evil-paste-clear-minibuffer-first nil))
-;;           (when text
-;;             (if (functionp yank-handler)
-;;                 (let ((evil-paste-count count)
-;;                       ;; for non-interactive use
-;;                       (this-command #'evil-paste-after))
-;;                   (push-mark opoint t)
-;;                   (insert-for-yank text))
-;;               ;; no yank-handler, default
-;;               (when (vectorp text)
-;;                 (setq text (evil-vector-to-string text)))
-;;               (set-text-properties 0 (length text) nil text)
-;;               (push-mark opoint t)
-;;               (dotimes (_ (or count 1))
-;;                 (insert-for-yank text))
-;;               (setq evil-last-paste
-;;                     (list #'evil-paste-before
-;;                           count
-;;                           opoint
-;;                           opoint        ; beg
-;;                           (point)))     ; end
-;;               (evil-set-marker ?\[ opoint)
-;;               (evil-set-marker ?\] (1- (point)))
-;;               (when (and evil-move-cursor-back
-;;                          (> (length text) 0))
-;;                 (backward-char))))
-;;           (when evil--cursor-after
-;;             (if (eq 'evil-yank-line-handler yank-handler)
-;;                 (ignore-errors (evil-next-line-first-non-blank))
-;;               (evil-forward-char 1 nil t))
-;;             (setq evil--cursor-after nil))
-;;           ;; no paste-pop after pasting from a register
-;;           (when register
-;;             (setq evil-last-paste nil))
-;;           (goto-char opoint)
-;;           (and (> (length text) 0) text)))))
+;; ;;   (evil-define-command my/evil-paste-after
+;; ;;     (count &optional register yank-handler)
+;; ;;     "Paste the latest yanked text before the cursor position.
+;; ;; The return value is the yanked text."
+;; ;;     :suppress-operator t
+;; ;;     (interactive "*P<x>")
+;; ;;     (setq count (prefix-numeric-value count))
+;; ;;     (if (evil-visual-state-p)
+;; ;;         ;; This is the only difference with evil-paste-after in visual-state
+;; ;;         (let ((evil-kill-on-visual-paste (not evil-kill-on-visual-paste)))
+;; ;;           (evil-visual-paste count register))
+;; ;;       (evil-with-undo
+;; ;;         (let* ((text (copy-sequence
+;; ;;                       (if register
+;; ;;                           (evil-get-register register)
+;; ;;                         (current-kill 0))))
+;; ;;                (yank-handler (or yank-handler
+;; ;;                                  (when (stringp text)
+;; ;;                                    (car-safe (get-text-property
+;; ;;                                               0 'yank-handler text)))))
+;; ;;                (opoint (point)))
+;; ;;           (when evil-paste-clear-minibuffer-first
+;; ;;             (delete-minibuffer-contents)
+;; ;;             (setq evil-paste-clear-minibuffer-first nil))
+;; ;;           (when text
+;; ;;             (if (functionp yank-handler)
+;; ;;                 (let ((evil-paste-count count)
+;; ;;                       ;; for non-interactive use
+;; ;;                       (this-command #'evil-paste-after))
+;; ;;                   (push-mark opoint t)
+;; ;;                   (insert-for-yank text))
+;; ;;               ;; no yank-handler, default
+;; ;;               (when (vectorp text)
+;; ;;                 (setq text (evil-vector-to-string text)))
+;; ;;               (set-text-properties 0 (length text) nil text)
+;; ;;               (push-mark opoint t)
+;; ;;               (dotimes (_ (or count 1))
+;; ;;                 (insert-for-yank text))
+;; ;;               (setq evil-last-paste
+;; ;;                     (list #'evil-paste-before
+;; ;;                           count
+;; ;;                           opoint
+;; ;;                           opoint        ; beg
+;; ;;                           (point)))     ; end
+;; ;;               (evil-set-marker ?\[ opoint)
+;; ;;               (evil-set-marker ?\] (1- (point)))
+;; ;;               (when (and evil-move-cursor-back
+;; ;;                          (> (length text) 0))
+;; ;;                 (backward-char))))
+;; ;;           (when evil--cursor-after
+;; ;;             (if (eq 'evil-yank-line-handler yank-handler)
+;; ;;                 (ignore-errors (evil-next-line-first-non-blank))
+;; ;;               (evil-forward-char 1 nil t))
+;; ;;             (setq evil--cursor-after nil))
+;; ;;           ;; no paste-pop after pasting from a register
+;; ;;           (when register
+;; ;;             (setq evil-last-paste nil))
+;; ;;           (goto-char opoint)
+;; ;;           (and (> (length text) 0) text)))))
 
-;;   (evil-define-motion evil-find-char-after (count char)
-;;     "Move point immediately after the next COUNT'th occurrence of CHAR.
-;; Movement is restricted to the current line unless `evil-cross-lines' is non-nil."
-;;     :type inclusive
-;;     (interactive "<c><C>")
-;;     (unless count (setq count 1))
-;;     (if (< count 0)
-;;         (evil-find-char-backward (- count) char)
-;;       (when (= (char-after) char)
-;;         (forward-char)
-;;         (cl-decf count))
-;;       (evil-find-char count char)
-;;       (forward-char))
-;;     (setq evil-last-find (list #'evil-find-char-after char (> count 0))))
+;; ;;   (evil-define-motion evil-find-char-after (count char)
+;; ;;     "Move point immediately after the next COUNT'th occurrence of CHAR.
+;; ;; Movement is restricted to the current line unless `evil-cross-lines' is non-nil."
+;; ;;     :type inclusive
+;; ;;     (interactive "<c><C>")
+;; ;;     (unless count (setq count 1))
+;; ;;     (if (< count 0)
+;; ;;         (evil-find-char-backward (- count) char)
+;; ;;       (when (= (char-after) char)
+;; ;;         (forward-char)
+;; ;;         (cl-decf count))
+;; ;;       (evil-find-char count char)
+;; ;;       (forward-char))
+;; ;;     (setq evil-last-find (list #'evil-find-char-after char (> count 0))))
 
-;;   (defun evil-forward-after-end (thing &optional count)
-;;     "Move forward to end of THING.
-;; The motion is repeated COUNT times."
-;;     (setq count (or count 1))
-;;     (cond
-;;      ((> count 0)
-;;       (forward-thing thing count))
-;;      (t
-;;       (unless (bobp) (forward-char -1))
-;;       (let ((bnd (bounds-of-thing-at-point thing))
-;;             rest)
-;;         (when bnd
-;;           (cond
-;;            ((< (point) (cdr bnd)) (goto-char (car bnd)))
-;;            ((= (point) (cdr bnd)) (cl-incf count))))
-;;         (condition-case nil
-;;             (when (zerop (setq rest (forward-thing thing count)))
-;;               (end-of-thing thing))
-;;           (error))
-;;         rest))))
+;; ;;   (defun evil-forward-after-end (thing &optional count)
+;; ;;     "Move forward to end of THING.
+;; ;; The motion is repeated COUNT times."
+;; ;;     (setq count (or count 1))
+;; ;;     (cond
+;; ;;      ((> count 0)
+;; ;;       (forward-thing thing count))
+;; ;;      (t
+;; ;;       (unless (bobp) (forward-char -1))
+;; ;;       (let ((bnd (bounds-of-thing-at-point thing))
+;; ;;             rest)
+;; ;;         (when bnd
+;; ;;           (cond
+;; ;;            ((< (point) (cdr bnd)) (goto-char (car bnd)))
+;; ;;            ((= (point) (cdr bnd)) (cl-incf count))))
+;; ;;         (condition-case nil
+;; ;;             (when (zerop (setq rest (forward-thing thing count)))
+;; ;;               (end-of-thing thing))
+;; ;;           (error))
+;; ;;         rest))))
    
-;;   (defun evil-backward-after-end (thing &optional count)
-;;     "Move backward to end of THING.
-;; The motion is repeated COUNT times. This is the same as calling
-;; `evil-forward-after-word-end' with -COUNT."
-;;     (evil-forward-after-end thing (- (or count 1))))
+;; ;;   (defun evil-backward-after-end (thing &optional count)
+;; ;;     "Move backward to end of THING.
+;; ;; The motion is repeated COUNT times. This is the same as calling
+;; ;; `evil-forward-after-word-end' with -COUNT."
+;; ;;     (evil-forward-after-end thing (- (or count 1))))
 
-;;   (evil-define-motion evil-forward-after-word-end (count &optional bigword)
-;;     "Move the cursor to the end of the COUNT-th next word.
-;; If BIGWORD is non-nil, move by WORDS."
-;;     :type inclusive
-;;     (let ((thing (if bigword 'evil-WORD 'evil-word))
-;;           (count (or count 1)))
-;;       (evil-signal-at-bob-or-eob count)
-;;       (evil-forward-after-end thing count)))
+;; ;;   (evil-define-motion evil-forward-after-word-end (count &optional bigword)
+;; ;;     "Move the cursor to the end of the COUNT-th next word.
+;; ;; If BIGWORD is non-nil, move by WORDS."
+;; ;;     :type inclusive
+;; ;;     (let ((thing (if bigword 'evil-WORD 'evil-word))
+;; ;;           (count (or count 1)))
+;; ;;       (evil-signal-at-bob-or-eob count)
+;; ;;       (evil-forward-after-end thing count)))
 
-;;   (evil-define-motion evil-forward-after-WORD-end (count)
-;;     "Move the cursor to the end of the COUNT-th next WORD."
-;;     :type inclusive
-;;     (evil-forward-after-word-end count t))
+;; ;;   (evil-define-motion evil-forward-after-WORD-end (count)
+;; ;;     "Move the cursor to the end of the COUNT-th next WORD."
+;; ;;     :type inclusive
+;; ;;     (evil-forward-after-word-end count t))
 
-;;   (evil-define-motion evil-backward-after-word-end (count &optional bigword)
-;;     "Move the cursor to the end of the COUNT-th previous word.
-;; If BIGWORD is non-nil, move by WORDS."
-;;     :type inclusive
-;;     (let ((thing (if bigword 'evil-WORD 'evil-word)))
-;;       (evil-signal-at-bob-or-eob (- (or count 1)))
-;;       (evil-backward-after-end thing count)))
+;; ;;   (evil-define-motion evil-backward-after-word-end (count &optional bigword)
+;; ;;     "Move the cursor to the end of the COUNT-th previous word.
+;; ;; If BIGWORD is non-nil, move by WORDS."
+;; ;;     :type inclusive
+;; ;;     (let ((thing (if bigword 'evil-WORD 'evil-word)))
+;; ;;       (evil-signal-at-bob-or-eob (- (or count 1)))
+;; ;;       (evil-backward-after-end thing count)))
 
-;;   (evil-define-motion evil-backward-after-WORD-end (count)
-;;     "Move the cursor to the end of the COUNT-th previous WORD."
-;;     :type inclusive
-;;     (evil-backward-after-word-end count t))
+;; ;;   (evil-define-motion evil-backward-after-WORD-end (count)
+;; ;;     "Move the cursor to the end of the COUNT-th previous WORD."
+;; ;;     :type inclusive
+;; ;;     (evil-backward-after-word-end count t))
 
 
-;;   ;; redefine `inclusive' motion type to not include character after point
-;;   (evil-define-type inclusive
-;;     "Return the positions unchanged, with some exceptions.
-;; If the end position is at the beginning of a line, then:
+;; ;;   ;; redefine `inclusive' motion type to not include character after point
+;; ;;   (evil-define-type inclusive
+;; ;;     "Return the positions unchanged, with some exceptions.
+;; ;; If the end position is at the beginning of a line, then:
 
-;; * If the beginning position is at or before the first non-blank
-;;   character on the line, return `line' (expanded)."
-;;     :expand (lambda (beg end) (evil-range beg end))
-;;     :contract (lambda (beg end) (evil-range beg end))
-;;     :normalize (lambda (beg end)
-;;                  (cond
-;;                   ((progn
-;;                      (goto-char end)
-;;                      (and (/= beg end) (bolp)))
-;;                    (setq end (max beg (1- end)))
-;;                    (cond
-;;                     ((progn
-;;                        (goto-char beg)
-;;                        (looking-back "^[ \f\t\v]*" (line-beginning-position)))
-;;                      (evil-expand beg end 'line))
-;;                     (t
-;;                      (unless evil-cross-lines
-;;                        (setq end (max beg (1- end))))
-;;                      (evil-expand beg end 'inclusive))))
-;;                   (t
-;;                    (evil-range beg end))))
-;;     :string (lambda (beg end)
-;;               (let ((width (- end beg)))
-;;                 (format "%s character%s" width
-;;                         (if (= width 1) "" "s")))))
+;; ;; * If the beginning position is at or before the first non-blank
+;; ;;   character on the line, return `line' (expanded)."
+;; ;;     :expand (lambda (beg end) (evil-range beg end))
+;; ;;     :contract (lambda (beg end) (evil-range beg end))
+;; ;;     :normalize (lambda (beg end)
+;; ;;                  (cond
+;; ;;                   ((progn
+;; ;;                      (goto-char end)
+;; ;;                      (and (/= beg end) (bolp)))
+;; ;;                    (setq end (max beg (1- end)))
+;; ;;                    (cond
+;; ;;                     ((progn
+;; ;;                        (goto-char beg)
+;; ;;                        (looking-back "^[ \f\t\v]*" (line-beginning-position)))
+;; ;;                      (evil-expand beg end 'line))
+;; ;;                     (t
+;; ;;                      (unless evil-cross-lines
+;; ;;                        (setq end (max beg (1- end))))
+;; ;;                      (evil-expand beg end 'inclusive))))
+;; ;;                   (t
+;; ;;                    (evil-range beg end))))
+;; ;;     :string (lambda (beg end)
+;; ;;               (let ((width (- end beg)))
+;; ;;                 (format "%s character%s" width
+;; ;;                         (if (= width 1) "" "s")))))
 
-;;   (evil-define-operator evil-top-join (beg end)
-;;     "Join the selected lines to top."
-;;     :motion evil-line
-;;     (let ((count (count-lines beg end))
-;;           last-line-blank)
-;;       (if (= count 1)
-;;           (evil-previous-line)
-;;         (setq count (1- count)))
-;;       (dotimes (i count)
-;;         (when (= (1+ i) count)       ; we're just before the last join
-;;           (evil-move-beginning-of-line)
-;;           (setq last-line-blank (looking-at "[ \t]*$")))
-;;         (join-line 1))
-;;       (and last-line-blank (indent-according-to-mode))))
+;; ;;   (evil-define-operator evil-top-join (beg end)
+;; ;;     "Join the selected lines to top."
+;; ;;     :motion evil-line
+;; ;;     (let ((count (count-lines beg end))
+;; ;;           last-line-blank)
+;; ;;       (if (= count 1)
+;; ;;           (evil-previous-line)
+;; ;;         (setq count (1- count)))
+;; ;;       (dotimes (i count)
+;; ;;         (when (= (1+ i) count)       ; we're just before the last join
+;; ;;           (evil-move-beginning-of-line)
+;; ;;           (setq last-line-blank (looking-at "[ \t]*$")))
+;; ;;         (join-line 1))
+;; ;;       (and last-line-blank (indent-according-to-mode))))
 
-;;   (evil-define-key '(normal insert) 'global (kbd "C-a") nil)
-;;   (evil-define-key '(normal insert) 'global (kbd "C-e") nil)
-;;   (evil-set-leader 'normal (kbd "<space>"))
+;;   (evil-define-key '(normal insert motion) 'global (kbd "C-a") nil)
+;;   (evil-define-key '(normal insert motion) 'global (kbd "C-e") nil)
+;;   (evil-set-leader 'normal (kbd "SPC"))
 ;;   (evil-define-key 'normal 'global
 ;;     (kbd "<leader>fs") #'save-buffer
 ;;     (kbd "<leader>bb") #'consult-buffer)
 ;;   ;; Setup Evil, Emacs cursor model:
 ;;   ;; motion command rebindings
-;;   (evil-define-key 'motion 'global
-;;     "t"  #'evil-find-char
-;;     "T"  #'evil-find-char-to-backward
-;;     "f"  #'evil-find-char-after
-;;     "F"  #'evil-find-char-backward
-;;     "e"  #'evil-forward-after-word-end
-;;     "E"  #'evil-forward-after-WORD-end
-;;     "ge" #'evil-backward-after-word-end
-;;     "gE" #'evil-backward-after-WORD-end
-;;     "%"  #'evil-jump-item-before)
-;;   (evil-define-key 'normal 'global
-;;     "p" #'evil-paste-before
-;;     "P" #'evil-paste-after
-;;     (kbd "C-J") #'evil-top-join)
+;;   ;; (evil-define-key 'motion 'global
+;;   ;;   "t"  #'evil-find-char
+;;   ;;   "T"  #'evil-find-char-to-backward
+;;   ;;   "f"  #'evil-find-char-after
+;;   ;;   "F"  #'evil-find-char-backward
+;;   ;;   "e"  #'evil-forward-after-word-end
+;;   ;;   "E"  #'evil-forward-after-WORD-end
+;;   ;;   "ge" #'evil-backward-after-word-end
+;;   ;;   "gE" #'evil-backward-after-WORD-end
+;;   ;;   "%"  #'evil-jump-item-before)
+;;   ;; (evil-define-key 'normal 'global
+;;   ;;   "p" #'evil-paste-before
+;;   ;;   "P" #'evil-paste-after
+;;   ;;   (kbd "C-J") #'evil-top-join)
 ;;   (evil-define-key 'insert 'global
 ;;     (kbd "C-y") nil)
+;;   (evil-declare-repeat 'evil-find-char)
+;;   (evil-declare-repeat 'evil-find-char-to)
   
 ;;   (evil-mode 1))
 
+;; (use-package evil-collection
+;;   :after evil
+;;   :ensure t
+;;   :config
+;;   (evil-collection-init))
+
+;; (use-package evil-args
+;;   :config
+
+;;   ;; bind evil-args text objects
+;;   (define-key evil-inner-text-objects-map "a" 'evil-inner-arg)
+;;   (define-key evil-outer-text-objects-map "a" 'evil-outer-arg)
+
+;;   ;; bind evil-forward/backward-args
+;;   (define-key evil-normal-state-map "L" 'evil-forward-arg)
+;;   (define-key evil-normal-state-map "H" 'evil-backward-arg)
+;;   (define-key evil-motion-state-map "L" 'evil-forward-arg)
+;;   (define-key evil-motion-state-map "H" 'evil-backward-arg)
+
+;;   ;; bind evil-jump-out-args
+;;   (define-key evil-normal-state-map "K" 'evil-jump-out-args))
+
+;; (use-package evil-surround
+;;   :ensure t
+;;   :config
+;;   (global-evil-surround-mode 1))
+
+;; (use-package evil-escape
+;;   :config
+;;   (setq-default evil-escape-delay 0.05)
+;;   (setq-default evil-escape-unordered-key-sequence t)
+;;   (evil-escape-mode))
+
+;; (use-package evil-lion
+;;   :config
+;;   (evil-lion-mode))
+
+;; (use-package evil-nerd-commenter
+;;   :config
+;;   (evilnc-default-hotkeys))
+
+;; (use-package evil-visualstar)
+
+;; (use-package evil-multiedit
+;;   :init
+;;   ;; Highlights all matches of the selection in the buffer.
+;;   (define-key evil-visual-state-map "R" 'evil-multiedit-match-all)
+
+;;   ;; Match the word under cursor (i.e. make it an edit region). Consecutive presses will
+;;   ;; incrementally add the next unmatched match.
+;;   (define-key evil-normal-state-map (kbd "M-d") 'evil-multiedit-match-and-next)
+;;   ;; Match selected region.
+;;   (define-key evil-visual-state-map (kbd "M-d") 'evil-multiedit-match-and-next)
+;;   ;; Insert marker at point
+;;   (define-key evil-insert-state-map (kbd "M-d") 'evil-multiedit-toggle-marker-here)
+
+;;   ;; Same as M-d but in reverse.
+;;   (define-key evil-normal-state-map (kbd "M-D") 'evil-multiedit-match-and-prev)
+;;   (define-key evil-visual-state-map (kbd "M-D") 'evil-multiedit-match-and-prev)
+
+;;   ;; OPTIONAL: If you prefer to grab symbols rather than words, use
+;;   ;; `evil-multiedit-match-symbol-and-next` (or prev).
+
+;;   ;; Restore the last group of multiedit regions.
+;;   (define-key evil-visual-state-map (kbd "C-M-D") 'evil-multiedit-restore)
+
+;;   ;; RET will toggle the region under the cursor
+;;   ;; (define-key evil-multiedit-mode-map (kbd "RET") 'evil-multiedit-toggle-or-restrict-region)
+
+;;   ;; ...and in visual mode, RET will disable all fields outside the selected region
+;;   (define-key evil-motion-state-map (kbd "RET") 'evil-multiedit-toggle-or-restrict-region)
+
+;;   ;; For moving between edit regions
+;;   ;; (define-key evil-multiedit-mode-map (kbd "C-n") 'evil-multiedit-next)
+;;   ;; (define-key evil-multiedit-mode-map (kbd "C-p") 'evil-multiedit-prev)
+
+;;   ;; Ex command that allows you to invoke evil-multiedit with a regular expression, e.g.
+;;   (evil-ex-define-cmd "ie[dit]" 'evil-multiedit-ex-match)
+;;   )
+;; (use-package evil-mc
+;;   :config
+;;   (global-evil-mc-mode  1))
 
 ;;;;;;; Programming languages
+
+;;;
+
+(use-package auctex
+  :config
+  (setq TeX-view-program-selection '((output-pdf "displayline")))
+
+  (setq TeX-view-program-list
+        '(("displayline"
+           "/Applications/Skim.app/Contents/SharedSupport/displayline -g %n %o %b"))))
+
 ;;; Markdown
 (use-package markdown-mode
   :if macos-p
@@ -1791,6 +1892,11 @@ ORIG is the advised function, which is called with its ARGS."
 ;;; LSP
 (use-package lsp-mode
   :if macos-p
+  :bind-keymap
+  ("C-c l" . lsp-command-map)
+  :bind
+  (:map lsp-command-map
+        ("g b" . xref-go-back))
   :config
   (setq lsp-headerline-breadcrumb-enable t
         gc-cons-threshold (* 100 1024 1024)
@@ -1834,8 +1940,11 @@ ORIG is the advised function, which is called with its ARGS."
 ;; ## added by OPAM user-setup for emacs / base ## 56ab50dc8996d2bb95e7856a6eddb17b ## you can edit, but keep this line
 (require 'opam-user-setup)
 
+(use-package merlin)
+
 (use-package tuareg
-  :hook (tuareg-mode . lsp-deferred))
+  :hook ((tuareg-mode . lsp-deferred)
+         (tuareg-mode . merlin-mode)))
 
 (use-package utop
   :config
@@ -1976,6 +2085,32 @@ ORIG is the advised function, which is called with its ARGS."
   :config
   (verilog-ext-mode-setup))
 
+(setq epa-pinentry-mode 'loopback)
+;; ChatGPT!
+(use-package gptel
+  :commands (gptel gptel-send)
+  :bind
+  (("C-c RET" . gptel-send))
+  :init
+  
+  :config
+  (setq gptel-curl-extra-args '("--cacert" "/Users/mayman03/Code/acl2/books/projects/rac/tests/env/lib/python3.12/site-packages/certifi/cacert.pem"))
+  (setq gptel-backend (gptel-make-openai "arm-proxy"
+                        :host "openai-api-proxy.geo.arm.com"
+                        :endpoint "/api/providers/openai-us/v1/chat/completions"
+                        :models '(gpt-4o o4-mini-high o4-mini o1 o1-pro gpt-4.5)
+                        ;;               :key "1869b0fb8de199763bb27a3276a191df94589183e8b75fd57191b281ccaa30d9"
+                        :key (let ((_ (auth-source-forget-all-cached))
+                                   (entry (car (auth-source-search :host "openai-api-proxy.geo.arm.com" :user "mayank.manjrekar2@arm.com" :require '(:secret)))))
+                               (if entry
+                                   (plist-get entry :secret)
+                                 (error "API key not found. Please check your auth-source configuration."))))))
+
+(use-package lean4-mode
+  :commands lean4-mode
+  :straight (lean4-mode :type git :host github
+                        :repo "leanprover-community/lean4-mode"
+                        :files ("*.el" "data")))
 
 ;; Set initial frame to full-screen
 (add-to-list 'default-frame-alist '(fullscreen . maximized))
