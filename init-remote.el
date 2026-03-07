@@ -21,6 +21,29 @@
 
 (setq package-enable-at-startup nil)
 
+
+(setq gnutls-verify-error (not (getenv-internal "INSECURE"))
+      gnutls-algorithm-priority
+      (when (boundp 'libgnutls-version)
+        (concat "SECURE128:+SECURE192:-VERS-ALL"
+                (if (and (not (version< emacs-version "26.3"))
+                         (>= libgnutls-version 30605))
+                    ":+VERS-TLS1.3")
+                ":+VERS-TLS1.2"))
+      ;; `gnutls-min-prime-bits' is set based on recommendations from
+      ;; https://www.keylength.com/en/4/
+      gnutls-min-prime-bits 3072
+      tls-checktrust gnutls-verify-error
+  ;; Emacs is built with `gnutls' by default, so `tls-program' would not be
+  ;; used in that case. Otherwise, people have reasons to not go with
+  ;; `gnutls', we use `openssl' instead. For more details, see
+  ;; https://redd.it/8sykl1
+      tls-program '("openssl s_client -connect %h:%p -CAfile %t -nbio -no_ssl3 -no_tls1 -no_tls1_1 -ign_eof"
+                    "gnutls-cli -p %p --dh-bits=3072 --ocsp --x509cafile=%t \
+--strict-tofu --priority='SECURE192:+SECURE128:-VERS-ALL:+VERS-TLS1.2:+VERS-TLS1.3' %h"
+                    ;; compatibility fallbacks
+                    "gnutls-cli -p %p %h"))
+
 ;;; straight.el
 (defvar bootstrap-version)
 (let ((bootstrap-file
@@ -158,7 +181,7 @@
         (expand-file-name "autosave/" user-emacs-directory))
   (setq tramp-auto-save-directory
         (expand-file-name "tramp-autosave/" user-emacs-directory))
-
+  
   ;; Auto save options
   ;; (setq kill-buffer-delete-auto-save-files t)
 
@@ -174,7 +197,7 @@
 
   ;; Start global-auto-revert mode
   (global-auto-revert-mode)
-
+  
 ;;; Frames and windows
 
   ;; However, do not resize windows pixelwise, as this can cause crashes in some
@@ -378,7 +401,7 @@
   (setq abbrev-file-name (expand-file-name "abbrev_defs" user-emacs-directory))
 
   (setq save-abbrevs 'silently)
-
+  
 ;;; Remove warnings from narrow-to-region, upcase-region...
 
   (dolist (cmd '(list-timers narrow-to-region upcase-region downcase-region
@@ -469,15 +492,6 @@
   (setq epa-pinentry-mode 'loopback)
   (global-visual-line-mode t)
 
-  (defun my-cleanup-on-save ()
-    "Untabify and clean up whitespace before saving the buffer."
-    (interactive)
-    (untabify (point-min) (point-max))
-    (whitespace-cleanup))
-
-  (add-hook 'before-save-hook 'my-cleanup-on-save)
-
-  ;; (server-start)
   ) ;; Emacs
 
 (use-package paren
@@ -535,7 +549,7 @@
   (setq vc-make-backup-files nil)  ; Do not backup version controlled files
   (setq vc-git-diff-switches '("--histogram"))  ; Faster algorithm for diffing.
   ) ;; VC
-
+  
 ;;; recentf
 
 (use-package recentf
@@ -625,7 +639,7 @@
     ;; Reduce memory usage and avoid cluttering *EGLOT events* buffer
     (setq eglot-events-buffer-size 0)  ; Deprecated
     (setq eglot-events-buffer-config '(:size 0 :format short)))
-
+  
   (setq eglot-report-progress my-emacs-debug)  ; Prevent minibuffer spam
   ) ;; eglot
 
@@ -638,7 +652,7 @@
   ;; Disable wrapping around when navigating Flymake errors.
   (setq flymake-wrap-around nil)
   ) ;; flymake
-
+  
 ;;; hl-line-mode
 (use-package hl-line
   :config
@@ -663,7 +677,7 @@
 (use-package flyspell
   :config
   (message "init.el: loaded flyspell")
-
+  
   (setq flyspell-issue-welcome-flag nil)
 
   ;; Improves flyspell performance by preventing messages from being displayed for
@@ -711,7 +725,7 @@
 
   (setq dabbrev-ignored-buffer-modes
         '(archive-mode image-mode docview-mode tags-table-mode pdf-view-mode))
-
+  
   (setq dabbrev-ignored-buffer-regexps
         '(;; - Buffers starting with a space (internal or temporary buffers)
           "\\` "
@@ -739,7 +753,7 @@
                  "LC_CTYPE"))
     (add-to-list 'exec-path-from-shell-variables var)))
 
-;; Autocompile, but don't interrupt me with native compilation warnings.
+;; Autocompile, but don't interrupt me with native compilation warnings. 
 (use-package auto-compile
   :config (auto-compile-on-load-mode))
 
@@ -754,7 +768,7 @@
   :config
   (message "init.el: loaded vertico")
   (vertico-mode)
-
+  
   ;; Add prompt indicator to `completing-read-multiple'.
   ;; We display [CRM<separator>], e.g., [CRM,] if the separator is a comma.
   (defun crm-indicator (args)
@@ -796,7 +810,7 @@
     "Call `consult-line` with the search string from the last `isearch`."
     (interactive)
     (consult-line isearch-string))
-
+      
   (setq register-preview-delay 0
         register-preview-function #'consult-register-format)
   (setq consult-preview-key '(:debounce 0.2 any)
@@ -932,13 +946,9 @@
   (load-theme 'modus-operandi-tinted)
 
   ;; fonts
-  (defun my-set-font ()
-    (set-face-attribute 'default nil
-                        :font "JetBrainsMono Nerd Font:pixelsize=14:weight=semi-bold:slant=normal:width=normal:spacing=0:scalable=true"))
-
-  (add-hook 'server-after-make-frame-hook #'my-set-font)
-  (add-hook 'after-init-hook #'my-set-font)
- )  ;; modus-theme
+  (set-face-attribute 'default nil
+                      :font "JetBrains Mono:pixelsize=14:weight=semibold:slant=normal:width=normal:spacing=100:scalable=true")
+  ) ;; modus-theme
 
 
 (use-package doom-modeline
@@ -1050,18 +1060,18 @@
 
 (use-package winum
   :bind (:map winum-keymap
-          ("C-`" . #'winum-select-window-by-number)
-          ("C-²" . #'winum-select-window-by-number)
-          ("M-0" . #'winum-select-window-0-or-10)
-          ("M-1" . #'winum-select-window-1)
-          ("M-2" . #'winum-select-window-2)
-          ("M-3" . #'winum-select-window-3)
-          ("M-4" . #'winum-select-window-4)
-          ("M-5" . #'winum-select-window-5)
-          ("M-6" . #'winum-select-window-6)
-          ("M-7" . #'winum-select-window-7)
-          ("M-8" . #'winum-select-window-8)
-          ("M-9" . #'winum-select-window-9))
+	      ("C-`" . #'winum-select-window-by-number)
+	      ("C-²" . #'winum-select-window-by-number)
+	      ("M-0" . #'winum-select-window-0-or-10)
+	      ("M-1" . #'winum-select-window-1)
+	      ("M-2" . #'winum-select-window-2)
+	      ("M-3" . #'winum-select-window-3)
+	      ("M-4" . #'winum-select-window-4)
+	      ("M-5" . #'winum-select-window-5)
+	      ("M-6" . #'winum-select-window-6)
+	      ("M-7" . #'winum-select-window-7)
+	      ("M-8" . #'winum-select-window-8)
+	      ("M-9" . #'winum-select-window-9))
   :hook (after-init . winum-mode)
   :config
   (message "init.el: loaded winum")
@@ -1077,7 +1087,7 @@
 
 (use-package yasnippet
   :diminish yas-minor-mode
-  ;; :hook (prog-mode . yas-minor-mode)
+  :hook (prog-mode . yas-minor-mode)
   :config
   (message "init.el: loaded yasnippet")
   (push '(yasnippet backquote-change) warning-suppress-types)
@@ -1085,8 +1095,8 @@
   (setq yas-installed-snippets-dir (expand-file-name "elisp/yasnippet-snippets" user-emacs-directory))
   (setq yas-snippet-dirs `(,(expand-file-name "elisp/yasnippet-snippets" user-emacs-directory)))
   (setq yas-expand-only-for-last-commands nil)
-
-  (yas-global-mode)
+  
+  ;; (yas-global-mode)
   (yas-reload-all)
   ) ;; yasnippet
 
@@ -1122,7 +1132,7 @@
   (setq evil-want-integration t)
   (setq evil-want-keybinding nil)
   (setq
-   ;; evil-respect-visual-line-mode t
+   evil-respect-visual-line-mode t
    evil-cross-lines t
    evil-want-fine-undo t
    ;; cursor-related `evil-mode' settings
@@ -1133,7 +1143,6 @@
   (dolist (mode '(acl2-doc-mode
                   eshell-mode
                   shell-mode
-                  neotree-mode
                   term-mode))
     (evil-set-initial-state mode 'emacs))
   (dolist (mode '(message-buffer-mode))
@@ -1229,12 +1238,8 @@
   :custom
   (easysession-save-interval (* 10 60))
   :init
-  (add-hook 'emacs-startup-hook #'(lambda ()
-                                    (let* ((env-session-name (getenv "EMACS_SESSION_NAME")))
-                                      (when (and env-session-name (not (string-empty-p env-session-name)))
-                                        (easysession-set-current-session-name env-session-name)
-                                        (easysession-load-including-geometry))) 102))
-  (add-hook 'emacs-startup-hook #'easysession-save-mode 103))
+  (add-hook 'emacs-startup-hook #'easysession-load-including-geometry 98)
+  (add-hook 'emacs-startup-hook #'easysession-save-mode 99))
 
 ;;;;;;;;; Programming languages
 (use-package auctex
@@ -1242,7 +1247,7 @@
   :config
   (message "init.el: loaded auctex")
   (setq TeX-view-program-selection '((output-pdf "displayline")))
-
+  
   (setq TeX-view-program-list
         '(("displayline"
            "/Applications/Skim.app/Contents/SharedSupport/displayline -g %n %o %b"))))
@@ -1253,21 +1258,21 @@
   :config
   (message "init.el: loaded markdown"))
 
-(use-package tree-sitter
-  :diminish
-  :config
-  (message "init.el: loaded tree-sitter")
-  (global-tree-sitter-mode))
-(use-package tree-sitter-langs
-  :config
-  (message "init.el: loaded tree-sitter-langs"))
-(use-package treesit-auto
-  :custom
-  (treesit-auto-install 'prompt)
-  :config
-  (message "init.el: loaded treesit-auto")
-  (treesit-auto-add-to-auto-mode-alist 'all)
-  (global-treesit-auto-mode))
+;; (use-package tree-sitter
+;;   :diminish
+;;   :config
+;;   (message "init.el: loaded tree-sitter")
+;;   (global-tree-sitter-mode))
+;; (use-package tree-sitter-langs
+;;   :config
+;;   (message "init.el: loaded tree-sitter-langs"))
+;; (use-package treesit-auto
+;;   :custom
+;;   (treesit-auto-install 'prompt)
+;;   :config
+;;   (message "init.el: loaded treesit-auto")
+;;   (treesit-auto-add-to-auto-mode-alist 'all)
+;;   (global-treesit-auto-mode))
 
 
 ;; OCaml configuration
@@ -1332,9 +1337,9 @@
 ;;   (load "~/Code/HOL/tools/hol-mode")
 ;;   (load "~/Code/HOL/tools/hol-unicode"))
 
-;; Verilog
-(use-package verilog-ts-mode
-  :mode "\\.s?vh?\\'")
+;;; Verilog
+;; (use-package verilog-ts-mode
+;;   :mode "\\.s?vh?\\'")
 (use-package verilog-ext
   :hook ((verilog-mode . verilog-ext-mode))
   :config
@@ -1363,76 +1368,7 @@
           ;; time-stamp
           block-end-comments
           ports))
-  (verilog-ext-mode-setup)
-  )
-
-
-
-(setq straight-host-usernames '((github . "mayankmanj")))
-(use-package lean4-mode
-  :straight (:type git
-                   :host github
-                   :repo "mayankmanj/lean4-mode"
-                   :branch "eglot-r"
-                   ;;        :branch "eglot")
-                   :files ("*.el" "data"))
-  :commands (lean4-mode)
-  :hook ((lean4-mode . corfu-popupinfo-mode)
-         (lean4-mode . (lambda () (advice-add 'corfu-popupinfo--get-documentation :around #'lean4-corfu-popup)))
-         )
-  :preface
-  (defun lean4-newline-and-indent ()
-    "Insert a newline and indent according to the previous line."
-    (interactive)
-    (let ((indentation (current-indentation)))
-      (newline)
-      (indent-line-to indentation)))
-  (defun evil-lean4-newline-and-indent ()
-    "Insert a newline and indent according to the previous line."
-    (interactive)
-    (progn
-      (evil-end-of-line 1)
-      (lean4-newline-and-indent)
-      (evil-insert 1)))
-  (defun lean4-corfu-popup-cand (candidate)
-    (when-let ((res (save-excursion
-                      (let ((inhibit-message t)
-                            (message-log-max nil)
-                            (inhibit-redisplay t)
-                            ;; Reduce print length for elisp backend (#249)
-                            (print-level 3)
-                            (print-length (* corfu-popupinfo-max-width
-                                             corfu-popupinfo-max-height))
-                            (rpcres (jsonrpc-request
-                                     (eglot--current-server-or-lose)
-                                     :completionItem/resolve
-                                     `(:label ,candidate
-                                              :insertTextFormat 1
-                                              :kind 23
-                                              :data (:params ,(eglot--TextDocumentPositionParams)
-                                                             :id (:const (:declName ,candidate))
-                                                             :cPos 0)))))
-                        (plist-get rpcres :detail)))))
-      (and (not (string-blank-p res)) res)))
-  (defun lean4-corfu-popup (fun c)
-    (if (eq major-mode 'lean4-mode)
-        (lean4-corfu-popup-cand c)
-      (funcall fun c)))
-  :config
-  (message "init.el: loaded lean4")
-  (setq lean4-info-plain nil)
-  (with-eval-after-load 'evil
-    (evil-define-key 'normal 'lean4-mode-map "o"
-      #'evil-lean4-newline-and-indent))
-  (add-hook 'lean4-mode-hook
-            (lambda ()
-              (local-set-key (kbd "RET") #'lean4-newline-and-indent)
-              (local-set-key (kbd "<backtab>") #'lean4-eri-indent-reverse)))
-  (setq corfu-popupinfo-delay 0.5))
-
-(use-package eldoc-box
-  :hook (((lean4-info-mode) . eldoc-box-hover-mode)))
-
+  (verilog-ext-mode-setup))
 
 ;; ChatGPT!
 (use-package gptel
@@ -1441,13 +1377,12 @@
   (("C-c RET" . gptel-send))
   :config
   (message "init.el: loaded gptel")
-  (setq gptel-curl-extra-args '("-k"))
-  ;; (setq gptel-curl-extra-args nil)
+  (setq gptel-curl-extra-args '("--cacert" "/opt/local/etc/openssl/cert.pem"))
   (setq gptel-backend
         (gptel-make-openai "arm-proxy"
           :host "openai-api-proxy.geo.arm.com"
-          :endpoint "/api/providers/openai-us/v1/chat/completions"
-          :models '(gpt-5 gpt-thinking gpt-5-pro)
+          :endpoint "/api/providers/openai/v1/chat/completions"
+          :models '(gpt-4o o4-mini-high o4-mini o1 o1-pro gpt-4.5)
           :key (let ((_ (auth-source-forget-all-cached))
                      (entry (car (auth-source-search :host "openai-api-proxy.geo.arm.com" :user "mayank.manjrekar2@arm.com" :require '(:secret))))) ;
                  (if entry
@@ -1556,7 +1491,7 @@
                        :description "the directory whose files are to be listed"))
    :category "file")
 
-  ;; Tool for
+  ;; Tool for 
   (gptel-make-tool
    :name "run_shell_command"
    :function (lambda (cmd)
@@ -1674,24 +1609,18 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 
   )
 
-(use-package copilot
-  :straight (:host github :repo "copilot-emacs/copilot.el" :files ("*.el"))
-  :ensure t
-  :config
-  (message "init.el: loaded Copilot")
-  (define-key copilot-completion-map (kbd "<tab>") 'copilot-accept-completion)
-  (define-key copilot-completion-map (kbd "TAB") 'copilot-accept-completion))
+;;; Email
+(require 'auth-source)
+(defun may/get-mail-password (username)
+  (let ((_ (auth-source-forget-all-cached))
+        (entry (car (auth-source-search :host "imap.gmail.com" :user username :require '(:secret))))) ;
+    (if entry
+        (funcall (plist-get entry :secret))
+      (error "API key not found. Please check your auth-source configuration."))))
+         
 
-;; (use-package ai-code-interface
-;;   :straight (:host github :repo "tninja/ai-code-interface.el")
-;;   :config
-;;   (message "init.el: loaded ai-code-interface")
-;;   (ai-code-set-backend  'codex) ;; use claude-code-ide as backend
-;;   ;; Enable global keybinding for the main menu
-;;   (global-set-key (kbd "C-c a") #'ai-code-menu)
-;;   ;; Optional: Set up Magit integration for AI commands in Magit popups
-;;   (with-eval-after-load 'magit
-;;     (ai-code-magit-setup-transients)))
+(add-to-list 'default-frame-alist '(fullscreen . maximized))
+
 
 ;; TODO Smartparens
 ;; (use-package smartparens
@@ -1701,10 +1630,10 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 ;;                                         ;(require 'smartparens-config)
 ;;                                         ;(add-hook 'emacs-lisp-mode-hook 'smartparens-mode)
 ;;                                         ;(add-hook 'emacs-lisp-mode-hook 'show-smartparens-mode)
-;;
+;; 
 ;; ;;;;;;;;;;;;;;;;;;;;;;;;
 ;;     ;; keybinding management
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-c s r n") 'sp-narrow-to-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-f") 'sp-forward-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-b") 'sp-backward-sexp)
@@ -1712,62 +1641,62 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 ;;     (define-key sp-keymap (kbd "C-M-a") 'sp-backward-down-sexp)
 ;;     (define-key sp-keymap (kbd "C-S-a") 'sp-beginning-of-sexp)
 ;;     (define-key sp-keymap (kbd "C-S-d") 'sp-end-of-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-M-e") 'sp-up-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-u") 'sp-backward-up-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-t") 'sp-transpose-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-M-n") 'sp-next-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-p") 'sp-previous-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-M-k") 'sp-kill-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-w") 'sp-copy-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "M-<delete>") 'sp-unwrap-sexp)
 ;;     (define-key sp-keymap (kbd "M-<backspace>") 'sp-backward-unwrap-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-<right>") 'sp-forward-slurp-sexp)
 ;;     (define-key sp-keymap (kbd "C-<left>") 'sp-forward-barf-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-<left>") 'sp-backward-slurp-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-<right>") 'sp-backward-barf-sexp)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "M-D") 'sp-splice-sexp)
 ;;     (define-key sp-keymap (kbd "C-M-<delete>") 'sp-splice-sexp-killing-forward)
 ;;     (define-key sp-keymap (kbd "C-M-<backspace>") 'sp-splice-sexp-killing-backward)
 ;;     (define-key sp-keymap (kbd "C-S-<backspace>") 'sp-splice-sexp-killing-around)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-]") 'sp-select-next-thing-exchange)
 ;;     (define-key sp-keymap (kbd "C-<left_bracket>") 'sp-select-previous-thing)
 ;;     (define-key sp-keymap (kbd "C-M-]") 'sp-select-next-thing)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "M-F") 'sp-forward-symbol)
 ;;     (define-key sp-keymap (kbd "M-B") 'sp-backward-symbol)
-;;
+;; 
 ;;     (define-key sp-keymap (kbd "C-c s t") 'sp-prefix-tag-object)
 ;;     (define-key sp-keymap (kbd "C-c s p") 'sp-prefix-pair-object)
-;;
+;;     
 ;;     (define-key sp-keymap (kbd "C-c s a") 'sp-absorb-sexp)
 ;;     (define-key sp-keymap (kbd "C-c s e") 'sp-emit-sexp)
 ;;     (define-key sp-keymap (kbd "C-c s p") 'sp-add-to-previous-sexp)
 ;;     (define-key sp-keymap (kbd "C-c s n") 'sp-add-to-next-sexp)
 ;;     (define-key sp-keymap (kbd "C-c s j") 'sp-join-sexp)
 ;;     (define-key sp-keymap (kbd "C-c s s") 'sp-split-sexp)
-;;
+;; 
 ;; ;;;;;;;;;;;;;;;;;;
 ;;     ;; pair management
-;;
+;; 
 ;;     (sp-local-pair 'minibuffer-inactive-mode "'" nil :actions nil)
-;;
+;;     
 ;; ;;; markdown-mode
 ;;     (sp-with-modes '(markdown-mode gfm-mode rst-mode)
 ;;       (sp-local-pair "*" "*" :bind "C-*")
 ;;       (sp-local-tag "2" "**" "**")
 ;;       (sp-local-tag "s" "```scheme" "```")
 ;;       (sp-local-tag "<"  "<_>" "</_>" :transform 'sp-match-sgml-tags))
-;;
+;;     
 ;; ;;; lisp modes
 ;;     (sp-with-modes sp--lisp-modes
-;;        (sp-local-pair "(" nil :bind "C-("))))
+;; 		  (sp-local-pair "(" nil :bind "C-("))))
 ;; Zsh config
 ;; Probably not needed
 ;; (use-package emacs
@@ -1781,25 +1710,9 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 ;;   :hook
 ;;   (shell-mode . my-shell-mode-hook)
 ;;   :config
-;;
+;;   
 ;;    ; Remember lots of previous commands in shell-mode
 ;;   (setq comint-input-ring-size 100000))
-
-(use-package neotree
-  ;; :hook (neotree-mode . #'turn-off-evil-mode)
-  :commands (neotree-toggle)
-  :init
-  (setq neo-theme (if (display-graphic-p) 'nerd-icons 'arrow))
-  (add-hook 'neotree-mode-hook #'turn-off-evil-mode nil t)
-  :config
-  (message "init.el: loaded neotree")
-
-  (defun winum-assign-0-to-neotree ()
-    (when (string-match-p (buffer-name) ".*\\*NeoTree\\*.*") 0))
-
-  (with-eval-after-load 'winum-mode
-    (add-to-list 'winum-assign-functions #'winum-assign-0-to-neotree))
-    )
 
 ;; Global keybindings:
 (use-package emacs
@@ -1821,18 +1734,18 @@ can get out of the minibuffer or other recursive edit,
 cancel the use of the current buffer (for special-purpose buffers)."
     (interactive)
     (cond ((eq last-command 'mode-exited) nil)
-          ((region-active-p)
-           (deactivate-mark))
-          ((> (minibuffer-depth) 0)
-           (abort-recursive-edit))
-          (current-prefix-arg
-           nil)
-          ((> (recursion-depth) 0)
-           (exit-recursive-edit))
-          (buffer-quit-function
-           (funcall buffer-quit-function))
-          ((string-match "^ \\*" (buffer-name (current-buffer)))
-           (bury-buffer))))
+	      ((region-active-p)
+	       (deactivate-mark))
+	      ((> (minibuffer-depth) 0)
+	       (abort-recursive-edit))
+	      (current-prefix-arg
+	       nil)
+	      ((> (recursion-depth) 0)
+	       (exit-recursive-edit))
+	      (buffer-quit-function
+	       (funcall buffer-quit-function))
+	      ((string-match "^ \\*" (buffer-name (current-buffer)))
+	       (bury-buffer))))
 
   (defun may/split-window-func-with-other-buffer (split-function)
     (lambda (&optional arg)
@@ -1877,7 +1790,7 @@ cancel the use of the current buffer (for special-purpose buffers)."
   (keymap-global-set "C-x r x" #'consult-register)
   (keymap-global-set "C-x r b" #'consult-bookmark)
   (keymap-global-set "C-c k" #'consult-kmacro)
-  (keymap-global-set "C-x M-:" #'consult-complex-command)
+  (keymap-global-set "C-x M-:" #'consult-complex-command) 
   (keymap-global-set "C-x 4 b" #'consult-buffer-other-window)
   (keymap-global-set "C-x 5 b" #'consult-buffer-other-frame)
   (keymap-global-set "M-#" #'consult-register-load)
@@ -1915,7 +1828,7 @@ cancel the use of the current buffer (for special-purpose buffers)."
   (keymap-set isearch-mode-map "M-e" #'consult-isearch)
   (keymap-set isearch-mode-map "M-s e" #'consult-isearch)
   (keymap-set isearch-mode-map "M-s l" #'consult-line)
-
+  
   (keymap-global-set "C-M-<backspace>" #'my-kill-back-to-indentation)
   ;; Modus themes
   ;; (keymap-global-set "<f5>" #'modus-themes-toggle)
@@ -1927,7 +1840,6 @@ cancel the use of the current buffer (for special-purpose buffers)."
   (keymap-global-set "M-o" #'other-window)
   (keymap-global-set "C-a" #'my-smarter-move-beginning-of-line)
   (keymap-global-set "M-/" #'hippie-expand)
-  (keymap-global-set "<f8>" #'neotree-toggle)
   (with-eval-after-load 'magit
     (keymap-unset magit-status-mode-map "M-1")
     (keymap-unset magit-status-mode-map "M-2")
@@ -1935,7 +1847,6 @@ cancel the use of the current buffer (for special-purpose buffers)."
     (keymap-unset magit-status-mode-map "M-4"))
   )
 
-(add-to-list 'default-frame-alist '(fullscreen . maximized))
 ;;; Load post init
 (setq my-emacs--success t)
 
