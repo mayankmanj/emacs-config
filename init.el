@@ -1371,8 +1371,7 @@
 (setq straight-host-usernames '((github . "mayankmanj")))
 (use-package lean4-mode
   :straight (:type git
-                   :host github
-                   :repo "mayankmanj/lean4-mode"
+                   :url "git@github.com:mayankmanj/lean4-mode.git"
                    :branch "eglot-r"
                    ;;        :branch "eglot")
                    :files ("*.el" "data"))
@@ -1801,6 +1800,18 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
     (add-to-list 'winum-assign-functions #'winum-assign-0-to-neotree))
     )
 
+(use-package eat)
+;; Claude code
+(use-package claude-code-ide
+  :straight (:type git :host github :repo "manzaltu/claude-code-ide.el")
+  :bind ("C-c C-'" . claude-code-ide-menu) ; Set your favorite keybinding
+  :config
+  (setq claude-code-ide-terminal-backend 'eat)
+  (claude-code-ide-emacs-tools-setup)
+
+
+  ) ; Optionally enable Emacs MCP tools
+
 ;; Global keybindings:
 (use-package emacs
   :after init
@@ -1934,6 +1945,7 @@ cancel the use of the current buffer (for special-purpose buffers)."
     (keymap-unset magit-status-mode-map "M-3")
     (keymap-unset magit-status-mode-map "M-4"))
   )
+
 
 (add-to-list 'default-frame-alist '(fullscreen . maximized))
 ;;; Load post init
