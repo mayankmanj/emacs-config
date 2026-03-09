@@ -1,0 +1,15 @@
+/.agent-shell/
+/straight/
+/transient/
+/tramp
+/saveplace
+/savehist
+/recentf
+/projects
+/places
+/elpa/
+/eln-cache/
+/custom-settings.el
+/autosave/*
+/agent/
+/.session

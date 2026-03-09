@@ -43,11 +43,9 @@
 
 ;; set use-package-verbose to t for interpreted .emacs,
 ;; and to nil for byte-compiled .emacs.elc.
+;; Verbose when running interpreted (not byte-compiled); overrides early-init.
 (eval-and-compile
-  (setq use-package-verbose (not (bound-and-true-p byte-compile-current-file)))
-  (setq use-package-expand-minimally t)
-  (setq use-package-compute-statistics t)
-  (setq use-package-enable-imenu-support t))
+  (setq use-package-verbose (not (bound-and-true-p byte-compile-current-file))))
 
 (use-package emacs
   :config
@@ -412,12 +410,15 @@
     (setq x-alt-keysym 'meta)
     (setq x-super-keysym 'meta))
 
-  (defadvice kill-region (before slick-cut activate compile)
-    "When called interactively with no active region, kill a single line instead."
-    (interactive
-     (if mark-active (list (region-beginning) (region-end))
-       (list (line-beginning-position)
-             (line-beginning-position 2)))))
+  (advice-add 'kill-region :around
+    (lambda (fn &optional beg end region)
+      "When called interactively with no active region, kill a single line instead."
+      (interactive
+       (if mark-active (list (region-beginning) (region-end))
+         (list (line-beginning-position)
+               (line-beginning-position 2))))
+      (funcall fn beg end region))
+    '((name . slick-cut)))
 
   ;; Misc settings
   (setq-default
@@ -425,7 +426,6 @@
    bookmark-default-file (expand-file-name ".bookmarks.el" user-emacs-directory)
    buffers-menu-max-size 30
    case-fold-search t
-   make-backup-files nil
    save-interprogram-paste-before-kill t
    set-mark-command-repeat-pop t
    tooltip-delay 1.5)
@@ -443,15 +443,12 @@
   ;; If a popup does happen, don't resize windows to be equal-sized
   (setq even-window-sizes nil)
 
-  (setq set-mark-command-repeat-pop t)
-
   (prefer-coding-system 'utf-8)
   (when (display-graphic-p)
     (setq x-select-request-type '(UTF8_STRING COMPOUND_TEXT TEXT STRING)))
 
   (defun my-dabbrev-friend-buffer (other-buffer)
     (< (buffer-size other-buffer) (* 1 1024 1024)))
-  (setq save-abbrevs 'silently)
   (setq dabbrev-friend-buffer-function 'my-dabbrev-friend-buffer)
   (setq hippie-expand-try-functions-list
         '(yas-hippie-try-expand
@@ -467,13 +464,14 @@
           try-complete-lisp-symbol))
 
   (setq epa-pinentry-mode 'loopback)
-  (global-visual-line-mode t)
 
   (defun my-cleanup-on-save ()
-    "Untabify and clean up whitespace before saving the buffer."
-    (interactive)
-    (untabify (point-min) (point-max))
-    (whitespace-cleanup))
+    "Clean up whitespace before saving. Only runs in prog/text modes.
+Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
+    (when (derived-mode-p 'prog-mode 'text-mode)
+      (unless indent-tabs-mode
+        (untabify (point-min) (point-max)))
+      (whitespace-cleanup)))
 
   (add-hook 'before-save-hook 'my-cleanup-on-save)
 
@@ -481,7 +479,6 @@
   ) ;; Emacs
 
 (use-package paren
-  :after emacs
   :config
   (message "init.el: loaded paren")
 ;;; Show-paren
@@ -764,20 +761,7 @@
                    crm-separator)
                   (car args))
           (cdr args)))
-  (advice-add #'completing-read-multiple :filter-args #'crm-indicator)
-
-  ;; Do not allow the cursor in the minibuffer prompt
-  (setq minibuffer-prompt-properties
-        '(read-only t cursor-intangible t face minibuffer-prompt))
-  (add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
-
-  ;; Support opening new minibuffers from inside existing minibuffers.
-  (setq enable-recursive-minibuffers t)
-
-  ;; Emacs 28 and newer: Hide commands in M-x which do not work in the current
-  ;; mode.  Vertico commands are hidden in normal buffers. This setting is
-  ;; useful beyond Vertico.
-  (setq read-extended-command-predicate #'command-completion-default-include-p))
+  (advice-add #'completing-read-multiple :filter-args #'crm-indicator))
 
 ;; `orderless' completion style.
 (use-package orderless
@@ -942,33 +926,17 @@
 
 
 (use-package doom-modeline
-  :ensure t
   :init (doom-modeline-mode 1)
   :config
-  (setq doom-modeline-height 25)
-  (setq nerd-icons-scale-factor 1.2))
+  (setq doom-modeline-height 1)
 
-;; (use-package doom-themes
-;;   :ensure t
-;;   :custom
-;;   ;; Global settings (defaults)
-;;   (doom-themes-enable-bold t)   ; if nil, bold is universally disabled
-;;   (doom-themes-enable-italic t) ; if nil, italics is universally disabled
-;;   ;; for treemacs users
-;;   (doom-themes-treemacs-theme "doom-atom") ; use "doom-colors" for less minimal icon theme
-;;   :config
-;;   (load-theme 'doom-dark+ t)
+  (setq nerd-icons-scale-factor 1.2)
+  ;; *Messages* is created before doom-modeline loads, so its modeline
+  ;; is never set via hooks — force it here.
+  (with-current-buffer "*Messages*"
+    (doom-modeline-set-main-modeline)))
 
-  ;; Enable flashing mode-line on errors
-  ;; (doom-themes-visual-bell-config)
-  ;; Enable custom neotree theme (nerd-icons must be installed!)
-  ;; (doom-themes-neotree-config)
-  ;; or for treemacs users
-  ;; (doom-themes-treemacs-config)
-  ;; Corrects (and improves) org-mode's native fontification.
-  ;; (doom-themes-org-config))
 
-;; ;;; Session
 (use-package session
   :preface
   ;;; Desktop save
@@ -1042,11 +1010,8 @@
   (winner-mode)
   ) ;; winner mode
 
-(use-package emacs
-  :after occur
-  :bind
-  (:map occur-mode-map
-        ("C-x C-q" . #'occur-edit-mode)))
+(with-eval-after-load 'replace
+  (keymap-set occur-mode-map "C-x C-q" #'occur-edit-mode))
 
 (use-package winum
   :bind (:map winum-keymap
@@ -1081,7 +1046,6 @@
   :config
   (message "init.el: loaded yasnippet")
   (push '(yasnippet backquote-change) warning-suppress-types)
-  (add-hook 'hippie-expand-try-functions-list 'yas-hippie-try-expand)
   (setq yas-installed-snippets-dir (expand-file-name "elisp/yasnippet-snippets" user-emacs-directory))
   (setq yas-snippet-dirs `(,(expand-file-name "elisp/yasnippet-snippets" user-emacs-directory)))
   (setq yas-expand-only-for-last-commands nil)
@@ -1106,7 +1070,7 @@
   ) ;; git-gutter
 
 (use-package git-gutter-fringe
-  :after git-gitter
+  :after git-gutter
   :config
   (message "init.el: loaded git-gutter-fringe")
   (define-fringe-bitmap 'git-gutter-fr:added [224] nil nil               '(center repeated))
@@ -1192,7 +1156,7 @@
     (evil-define-key 'normal magit-section-mode-map (kbd "M-1") nil)
     (evil-define-key 'normal magit-status-mode-map (kbd "M-2") nil)
     (evil-define-key 'normal magit-section-mode-map (kbd "M-2") nil)
-    (evil-define-key 'normal magit-status-mode-map (kbd "M-2") nil)
+    (evil-define-key 'normal magit-status-mode-map (kbd "M-3") nil)
     (evil-define-key 'normal magit-section-mode-map (kbd "M-3") nil)
     (evil-define-key 'normal magit-status-mode-map (kbd "M-4") nil)
     (evil-define-key 'normal magit-section-mode-map (kbd "M-4") nil))
@@ -1270,41 +1234,6 @@
   (global-treesit-auto-mode))
 
 
-;; OCaml configuration
-;;  - better error and backtrace matching
-
-(defun set-ocaml-error-regexp ()
-  (set
-   'compilation-error-regexp-alist
-   (list '("[Ff]ile \\(\"\\(.*?\\)\", line \\(-?[0-9]+\\)\\(, characters \\(-?[0-9]+\\)-\\([0-9]+\\)\\)?\\)\\(:\n\\(\\(Warning .*?\\)\\|\\(Error\\)\\):\\)?"
-    2 3 (5 . 6) (9 . 11) 1 (8 compilation-message-face)))))
-
-(use-package merlin
-  :hook (tuareg-mode . merlin-mode)
-  :config
-  (message "init.el: loaded merlin")
-  ) ;; merlin
-
-(use-package tuareg
-  :mode "\\.ml\\'"
-  :hook (;; (tuareg-mode . lsp-deferred)
-         (tuareg-mode . set-ocaml-error-regexp))
-  :config
-  (message "init.el: loaded tuareg")
-  (require 'opam-user-setup)
-  ) ;; tuareg
-
-(use-package utop
-  :commands (utop)
-  :config
-  (message "init.el: loaded utop")
-  (setq utop-command "opam exec -- dune utop . -- -emacs")
-  ) ;; utop
-
-(use-package ocamlformat
-  :bind ("<f6>" . ocamlformat)
-  :config
-  (message "init.el: loaded ocamlformat"))
 
 (use-package session-async
   :if macos-p)
@@ -1366,19 +1295,17 @@
   (verilog-ext-mode-setup)
   )
 
-
-
 (setq straight-host-usernames '((github . "mayankmanj")))
 (use-package lean4-mode
   :straight (:type git
-                   :url "git@github.com:mayankmanj/lean4-mode.git"
+                   :host nil
+                   :repo "git@github.com:mayankmanj/lean4-mode.git"
                    :branch "eglot-r"
                    ;;        :branch "eglot")
                    :files ("*.el" "data"))
   :commands (lean4-mode)
   :hook ((lean4-mode . corfu-popupinfo-mode)
-         (lean4-mode . (lambda () (advice-add 'corfu-popupinfo--get-documentation :around #'lean4-corfu-popup)))
-         )
+         (lean4-mode . (lambda () (advice-add 'corfu-popupinfo--get-documentation :around #'lean4-corfu-popup))))
   :preface
   (defun lean4-newline-and-indent ()
     "Insert a newline and indent according to the previous line."
@@ -1389,33 +1316,25 @@
   (defun evil-lean4-newline-and-indent ()
     "Insert a newline and indent according to the previous line."
     (interactive)
-    (progn
-      (evil-end-of-line 1)
-      (lean4-newline-and-indent)
-      (evil-insert 1)))
-  (defun lean4-corfu-popup-cand (candidate)
-    (when-let ((res (save-excursion
-                      (let ((inhibit-message t)
-                            (message-log-max nil)
-                            (inhibit-redisplay t)
-                            ;; Reduce print length for elisp backend (#249)
-                            (print-level 3)
-                            (print-length (* corfu-popupinfo-max-width
-                                             corfu-popupinfo-max-height))
-                            (rpcres (jsonrpc-request
-                                     (eglot--current-server-or-lose)
-                                     :completionItem/resolve
-                                     `(:label ,candidate
-                                              :insertTextFormat 1
-                                              :kind 23
-                                              :data (:params ,(eglot--TextDocumentPositionParams)
-                                                             :id (:const (:declName ,candidate))
-                                                             :cPos 0)))))
-                        (plist-get rpcres :detail)))))
+    (evil-end-of-line 1)
+    (lean4-newline-and-indent)
+    (evil-insert 1))
+  (defun lean4-corfu-popup-cand (candidate server)
+    (when-let* ((item (get-text-property 0 'eglot--lsp-item candidate))
+                (res (let ((inhibit-message t)
+                           (message-log-max nil)
+                           (inhibit-redisplay t)
+                           ;; Reduce print length for elisp backend (#249)
+                           (print-level 3)
+                           (print-length (* corfu-popupinfo-max-width
+                                            corfu-popupinfo-max-height)))
+                       (plist-get
+                        (jsonrpc-request server :completionItem/resolve item)
+                        :detail))))
       (and (not (string-blank-p res)) res)))
   (defun lean4-corfu-popup (fun c)
     (if (eq major-mode 'lean4-mode)
-        (lean4-corfu-popup-cand c)
+        (lean4-corfu-popup-cand c (eglot--current-server-or-lose))
       (funcall fun c)))
   :config
   (message "init.el: loaded lean4")
@@ -1429,11 +1348,20 @@
               (local-set-key (kbd "<backtab>") #'lean4-eri-indent-reverse)))
   (setq corfu-popupinfo-delay 0.5))
 
+(use-package indent-bars
+  :straight (:type git :host github :repo "jdtsmith/indent-bars")
+  :hook (lean4-mode . indent-bars-mode)
+  :custom
+  (indent-bars-treesit-support nil)   ; lean4 has no treesit grammar yet
+  (indent-bars-width-frac 0.2)
+  (indent-bars-pad-frac 0.1)
+  (indent-bars-color '(highlight :face-bg t :blend 0.4)))
+
 (use-package eldoc-box
   :hook (((lean4-info-mode) . eldoc-box-hover-mode)))
 
 
-;; ChatGPT!
+;; AI Config
 (use-package gptel
   :commands (gptel gptel-send)
   :bind
@@ -1673,116 +1601,15 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 
   )
 
-(use-package copilot
-  :straight (:host github :repo "copilot-emacs/copilot.el" :files ("*.el"))
+(use-package agent-shell
   :ensure t
-  :config
-  (message "init.el: loaded Copilot")
-  (define-key copilot-completion-map (kbd "<tab>") 'copilot-accept-completion)
-  (define-key copilot-completion-map (kbd "TAB") 'copilot-accept-completion))
+  ;; :ensure-system-package
+  ;; ;; Add agent installation configs here
+  ;; ((claude . "sudo port install claude-code")
+  ;;  (claude-agent-acp . "npm install -g @zed-industries/claude-agent-acp"))
+  )
 
-;; (use-package ai-code-interface
-;;   :straight (:host github :repo "tninja/ai-code-interface.el")
-;;   :config
-;;   (message "init.el: loaded ai-code-interface")
-;;   (ai-code-set-backend  'codex) ;; use claude-code-ide as backend
-;;   ;; Enable global keybinding for the main menu
-;;   (global-set-key (kbd "C-c a") #'ai-code-menu)
-;;   ;; Optional: Set up Magit integration for AI commands in Magit popups
-;;   (with-eval-after-load 'magit
-;;     (ai-code-magit-setup-transients)))
 
-;; TODO Smartparens
-;; (use-package smartparens
-;;   :if macos-p
-;;   :config
-;;   (progn
-;;                                         ;(require 'smartparens-config)
-;;                                         ;(add-hook 'emacs-lisp-mode-hook 'smartparens-mode)
-;;                                         ;(add-hook 'emacs-lisp-mode-hook 'show-smartparens-mode)
-;;
-;; ;;;;;;;;;;;;;;;;;;;;;;;;
-;;     ;; keybinding management
-;;
-;;     (define-key sp-keymap (kbd "C-c s r n") 'sp-narrow-to-sexp)
-;;     (define-key sp-keymap (kbd "C-M-f") 'sp-forward-sexp)
-;;     (define-key sp-keymap (kbd "C-M-b") 'sp-backward-sexp)
-;;     (define-key sp-keymap (kbd "C-M-d") 'sp-down-sexp)
-;;     (define-key sp-keymap (kbd "C-M-a") 'sp-backward-down-sexp)
-;;     (define-key sp-keymap (kbd "C-S-a") 'sp-beginning-of-sexp)
-;;     (define-key sp-keymap (kbd "C-S-d") 'sp-end-of-sexp)
-;;
-;;     (define-key sp-keymap (kbd "C-M-e") 'sp-up-sexp)
-;;     (define-key sp-keymap (kbd "C-M-u") 'sp-backward-up-sexp)
-;;     (define-key sp-keymap (kbd "C-M-t") 'sp-transpose-sexp)
-;;
-;;     (define-key sp-keymap (kbd "C-M-n") 'sp-next-sexp)
-;;     (define-key sp-keymap (kbd "C-M-p") 'sp-previous-sexp)
-;;
-;;     (define-key sp-keymap (kbd "C-M-k") 'sp-kill-sexp)
-;;     (define-key sp-keymap (kbd "C-M-w") 'sp-copy-sexp)
-;;
-;;     (define-key sp-keymap (kbd "M-<delete>") 'sp-unwrap-sexp)
-;;     (define-key sp-keymap (kbd "M-<backspace>") 'sp-backward-unwrap-sexp)
-;;
-;;     (define-key sp-keymap (kbd "C-<right>") 'sp-forward-slurp-sexp)
-;;     (define-key sp-keymap (kbd "C-<left>") 'sp-forward-barf-sexp)
-;;     (define-key sp-keymap (kbd "C-M-<left>") 'sp-backward-slurp-sexp)
-;;     (define-key sp-keymap (kbd "C-M-<right>") 'sp-backward-barf-sexp)
-;;
-;;     (define-key sp-keymap (kbd "M-D") 'sp-splice-sexp)
-;;     (define-key sp-keymap (kbd "C-M-<delete>") 'sp-splice-sexp-killing-forward)
-;;     (define-key sp-keymap (kbd "C-M-<backspace>") 'sp-splice-sexp-killing-backward)
-;;     (define-key sp-keymap (kbd "C-S-<backspace>") 'sp-splice-sexp-killing-around)
-;;
-;;     (define-key sp-keymap (kbd "C-]") 'sp-select-next-thing-exchange)
-;;     (define-key sp-keymap (kbd "C-<left_bracket>") 'sp-select-previous-thing)
-;;     (define-key sp-keymap (kbd "C-M-]") 'sp-select-next-thing)
-;;
-;;     (define-key sp-keymap (kbd "M-F") 'sp-forward-symbol)
-;;     (define-key sp-keymap (kbd "M-B") 'sp-backward-symbol)
-;;
-;;     (define-key sp-keymap (kbd "C-c s t") 'sp-prefix-tag-object)
-;;     (define-key sp-keymap (kbd "C-c s p") 'sp-prefix-pair-object)
-;;
-;;     (define-key sp-keymap (kbd "C-c s a") 'sp-absorb-sexp)
-;;     (define-key sp-keymap (kbd "C-c s e") 'sp-emit-sexp)
-;;     (define-key sp-keymap (kbd "C-c s p") 'sp-add-to-previous-sexp)
-;;     (define-key sp-keymap (kbd "C-c s n") 'sp-add-to-next-sexp)
-;;     (define-key sp-keymap (kbd "C-c s j") 'sp-join-sexp)
-;;     (define-key sp-keymap (kbd "C-c s s") 'sp-split-sexp)
-;;
-;; ;;;;;;;;;;;;;;;;;;
-;;     ;; pair management
-;;
-;;     (sp-local-pair 'minibuffer-inactive-mode "'" nil :actions nil)
-;;
-;; ;;; markdown-mode
-;;     (sp-with-modes '(markdown-mode gfm-mode rst-mode)
-;;       (sp-local-pair "*" "*" :bind "C-*")
-;;       (sp-local-tag "2" "**" "**")
-;;       (sp-local-tag "s" "```scheme" "```")
-;;       (sp-local-tag "<"  "<_>" "</_>" :transform 'sp-match-sgml-tags))
-;;
-;; ;;; lisp modes
-;;     (sp-with-modes sp--lisp-modes
-;;        (sp-local-pair "(" nil :bind "C-("))))
-;; Zsh config
-;; Probably not needed
-;; (use-package emacs
-;;   :preface
-;;   (defun my-shell-mode-hook ()
-;;     (setq comint-input-ring-file-name "~/.zsh_history")
-;;                                         ; Ignore timestamps in history file.  Assumes that zsh
-;;                                         ; EXTENDED_HISTORY option is in use.
-;;     (setq comint-input-ring-separator "\n: \\([0-9]+\\):\\([0-9]+\\);")
-;;     (comint-read-input-ring t))
-;;   :hook
-;;   (shell-mode . my-shell-mode-hook)
-;;   :config
-;;
-;;    ; Remember lots of previous commands in shell-mode
-;;   (setq comint-input-ring-size 100000))
 
 (use-package neotree
   ;; :hook (neotree-mode . #'turn-off-evil-mode)
@@ -1794,27 +1621,14 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
   (message "init.el: loaded neotree")
 
   (defun winum-assign-0-to-neotree ()
-    (when (string-match-p (buffer-name) ".*\\*NeoTree\\*.*") 0))
+    (when (string-match-p ".*\\*NeoTree\\*.*" (buffer-name)) 0))
 
-  (with-eval-after-load 'winum-mode
+  (with-eval-after-load 'winum
     (add-to-list 'winum-assign-functions #'winum-assign-0-to-neotree))
     )
 
-(use-package eat)
-;; Claude code
-(use-package claude-code-ide
-  :straight (:type git :host github :repo "manzaltu/claude-code-ide.el")
-  :bind ("C-c C-'" . claude-code-ide-menu) ; Set your favorite keybinding
-  :config
-  (setq claude-code-ide-terminal-backend 'eat)
-  (claude-code-ide-emacs-tools-setup)
-
-
-  ) ; Optionally enable Emacs MCP tools
-
 ;; Global keybindings:
 (use-package emacs
-  :after init
   :preface
   ;;; Kill back to indentation
   (defun my-kill-back-to-indentation ()
@@ -1939,11 +1753,6 @@ cancel the use of the current buffer (for special-purpose buffers)."
   (keymap-global-set "C-a" #'my-smarter-move-beginning-of-line)
   (keymap-global-set "M-/" #'hippie-expand)
   (keymap-global-set "<f8>" #'neotree-toggle)
-  (with-eval-after-load 'magit
-    (keymap-unset magit-status-mode-map "M-1")
-    (keymap-unset magit-status-mode-map "M-2")
-    (keymap-unset magit-status-mode-map "M-3")
-    (keymap-unset magit-status-mode-map "M-4"))
   )
 
 
