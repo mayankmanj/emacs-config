@@ -979,7 +979,17 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   ;; *Messages* is created before doom-modeline loads, so its modeline
   ;; is never set via hooks — force it here.
   (with-current-buffer "*Messages*"
-    (doom-modeline-set-main-modeline)))
+    (doom-modeline-set-main-modeline))
+
+  ;; Match evil state indicator colors to cursor colors.
+  ;; Dark backgrounds (maroon, sea-green, midnight-blue) get white fg;
+  ;; orange gets black fg for contrast.
+  (set-face-attribute 'doom-modeline-evil-normal-state   nil :background "maroon"       :foreground "white")
+  (set-face-attribute 'doom-modeline-evil-insert-state   nil :background "sea green"    :foreground "white")
+  (set-face-attribute 'doom-modeline-evil-visual-state   nil :background "midnight blue" :foreground "white")
+  (set-face-attribute 'doom-modeline-evil-motion-state   nil :background "orange"       :foreground "black")
+  (set-face-attribute 'doom-modeline-evil-operator-state nil :background "orange"       :foreground "black")
+  (set-face-attribute 'doom-modeline-evil-emacs-state    nil :background "gray40"       :foreground "white"))
 
 
 (use-package session
@@ -1153,42 +1163,12 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
     (evil-set-initial-state mode 'normal))
 
   (setq evil-mode-line-format '(before . mode-line-front-space))
-  (setq evil-emacs-state-cursor '(bar . 3))
-
-  (setq evil-normal-state-tag
-        (propertize "   N   "
-                    ;; 'face `(:background ,(modus-themes-get-color-value 'bg-blue-subtle)
-                    ;;                     :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    )
-        evil-emacs-state-tag
-        (propertize "---E---"
-                    ;; 'face
-                    ;; `(:background ,(modus-themes-get-color-value 'bg-red-intense)
-                    ;;               :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    )
-        evil-insert-state-tag
-        (propertize "***I***"
-                    ;; 'face
-                    ;; `(:background ,(modus-themes-get-color-value 'bg-graph-green-1)
-                    ;;               :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    )
-        evil-motion-state-tag
-        (propertize "   M   "
-                    ;; 'face
-                    ;; `(:background ,(modus-themes-get-color-value 'bg-lavender)
-                    ;;               :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    )
-        evil-visual-state-tag
-        (propertize "   V   "
-                    ;; 'face
-                    ;; `(:background ,(modus-themes-get-color-value 'bg-lavender)
-                    ;;               :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    )
-        evil-operator-state-tag
-        (propertize "   O   "
-                    ;; 'face `(:background ,(modus-themes-get-color-value 'bg-lavender)
-                    ;;                     :foreground ,(modus-themes-get-color-value 'fg-mode-line-active))
-                    ))
+  (setq evil-emacs-state-cursor   '(bar . 3))
+  (setq evil-normal-state-cursor  '("maroon" (bar . 4)))
+  (setq evil-insert-state-cursor  '("sea green" (bar . 4)))
+  (setq evil-visual-state-cursor  '("midnight blue" (bar . 4)))
+  (setq evil-motion-state-cursor  '("orange" (bar . 4)))
+  (setq evil-operator-state-cursor '("orange" (bar . 4)))
 
   (evil-define-key '(normal insert motion) 'global (kbd "C-t") nil)
   (evil-define-key '(normal insert motion) 'global (kbd "C-w") nil)
@@ -1226,6 +1206,10 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (advice-add 'evil-normal-state :after #'my-evil-normal-state)
 
   )
+
+(use-package evil-emacs-cursor-model-mode
+  :config
+  (evil-emacs-cursor-model-mode 1))
 
 ;; (use-package evil-collection
 ;;   :diminish
