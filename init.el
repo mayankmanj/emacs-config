@@ -73,6 +73,7 @@
   (setq use-package-verbose (not (bound-and-true-p byte-compile-current-file))))
 
 (use-package emacs
+  :ensure nil
   :config
 ;;; Minibuffer
 
@@ -504,6 +505,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   ) ;; Emacs
 
 (use-package paren
+  :ensure nil
   :config
   (message "init.el: loaded paren")
 ;;; Show-paren
@@ -518,6 +520,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;; Misc
 
 (use-package display-line-numbers
+  :ensure nil
   :hook ((text-mode prog-mode) . display-line-numbers-mode)
   :config
   (message "init.el: loaded display-line-numbers")
@@ -527,6 +530,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   ) ;; display-line-numbers
 
 (use-package tramp
+  :ensure nil
   :config
   (message "init.el: loaded tramp")
   (setq tramp-verbose 1)
@@ -537,6 +541,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;; Automatically rescan the buffer for Imenu entries when `imenu' is invoked
 ;; This ensures the index reflects recent edits.
 (use-package imenu
+  :ensure nil
   :config
   (message "init.el: loaded imenu")
   (setq imenu-auto-rescan t)
@@ -551,6 +556,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;; VC
 
 (use-package vc
+  :ensure nil
   :config
   (message "init.el: loaded vc")
   (setq vc-git-print-log-follow t)
@@ -561,6 +567,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;; recentf
 
 (use-package recentf
+  :ensure nil
   :config
   (message "init.el: loaded recentf")
   ;; `recentf' is an that maintains a list of recently accessed files.
@@ -575,6 +582,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; saveplace
 (use-package saveplace
+  :ensure nil
   :config
   (message "init.el: loaded saveplace")
   ;; Enables Emacs to remember the last location within a file upon reopening.
@@ -585,6 +593,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; savehist
 (use-package savehist
+  :ensure nil
   :config
   (message "init.el: loaded savehist")
   ;; `savehist-mode' is an Emacs feature that preserves the minibuffer history
@@ -604,6 +613,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;; Ediff
 
 (use-package ediff
+  :ensure nil
   :config
   (message "init.el: loaded ediff")
   ;; Configure Ediff to use a single frame and split windows horizontally
@@ -626,6 +636,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;; Eglot
 
 (use-package eglot
+  :ensure nil
   :defer t
   :config
   (message "init.el: loaded eglot")
@@ -653,6 +664,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; Flymake
 (use-package flymake
+  :ensure nil
   :config
   (message "init.el: loaded flymake")
   (setq flymake-show-diagnostics-at-end-of-line nil)
@@ -663,6 +675,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; hl-line-mode
 (use-package hl-line
+  :ensure nil
   :config
   (message "init.el: loaded hl-line")
 
@@ -674,6 +687,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; icomplete
 (use-package icomplete
+  :ensure nil
   :config
   (message "init.el: loaded icomplete")
   ;; Do not delay displaying completion candidates in `fido-mode' or
@@ -683,6 +697,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; flyspell
 (use-package flyspell
+  :ensure nil
   :config
   (message "init.el: loaded flyspell")
 
@@ -695,6 +710,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; ispell
 (use-package ispell
+  :ensure nil
   :config
   (message "init.el: loaded ispell")
   ;; In Emacs 30 and newer, disable Ispell completion to avoid annotation errors
@@ -706,6 +722,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; ibuffer
 (use-package ibuffer
+  :ensure nil
   :config
   (message "init.el: loaded ibuffer")
   (setq ibuffer-formats
@@ -718,6 +735,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; xref
 (use-package xref
+  :ensure nil
   :config
   (message "init.el: loaded xref")
   ;; Enable completion in the minibuffer instead of the definitions buffer
@@ -727,6 +745,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; dabbrev
 (use-package dabbrev
+  :ensure nil
   :config
   (message "init.el: loaded dabbrev")
   (setq dabbrev-upcase-means-case-search t)
@@ -767,6 +786,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; Replace selection on insert
 (use-package delsel
+  :ensure nil
   :init
   (delete-selection-mode 1)
   ) ;; delsel
@@ -1019,6 +1039,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; Winner mode - undo and redo window configuration
 (use-package winner
+  :ensure nil
   :config
   (message "init.el: loaded winner")
   (setq winner-boring-buffers
@@ -1060,6 +1081,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   ) ;; winum-mode
 
 (use-package find-dired
+  :ensure nil
   :after dired
   :config
   (message "init.el: loaded find-dired")
@@ -1650,6 +1672,7 @@ If RESET-BUFFER is non-nil, ask for the buffer again."
 
 ;; Global keybindings:
 (use-package emacs
+  :ensure nil
   :preface
   ;;; Kill back to indentation
   (defun my-kill-back-to-indentation ()
