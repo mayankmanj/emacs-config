@@ -1101,6 +1101,10 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (yas-reload-all)
   ) ;; yasnippet
 
+;;; transient (magit/gptel require >= 0.7.4; Emacs built-in is older)
+(use-package transient
+  :ensure t)
+
 ;;; Magit
 (use-package magit
   :bind (("C-x g" . magit-status))
