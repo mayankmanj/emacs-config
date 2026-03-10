@@ -770,7 +770,6 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 ;;; Exec path:
 (use-package exec-path-from-shell
-  :hook (after-init . exec-path-from-shell-initialize)
   :if macos-p
   :config
   (dolist (var '("SSH_AUTH_SOCK"
@@ -778,7 +777,8 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
                  "GPG_AGENT_INFO"
                  "LANG"
                  "LC_CTYPE"))
-    (add-to-list 'exec-path-from-shell-variables var)))
+    (add-to-list 'exec-path-from-shell-variables var))
+  (exec-path-from-shell-initialize))
 
 ;; Autocompile, but don't interrupt me with native compilation warnings.
 (use-package auto-compile
@@ -966,13 +966,13 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
                         :font "JetBrainsMono Nerd Font:pixelsize=14:weight=semi-bold:slant=normal:width=normal:spacing=0:scalable=true"))
 
   (add-hook 'server-after-make-frame-hook #'my-set-font)
-  (add-hook 'after-init-hook #'my-set-font)
+  (my-set-font)
  )  ;; modus-theme
 
 
 (use-package doom-modeline
-  :init (doom-modeline-mode 1)
   :config
+  (doom-modeline-mode 1)
   (setq doom-modeline-height 1)
 
   (setq nerd-icons-scale-factor 1.2)
@@ -988,17 +988,15 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (defun my-save-shell-buffer (desktop-dirname)
     ;; we only need to save the current working directory
     default-directory)
+  :hook
+  (shell-mode . (lambda ()
+                  (setq-local desktop-save-buffer #'my-save-shell-buffer)))
   :config
   (message "init.el: loaded session")
   (setq session-save-file (expand-file-name ".session" user-emacs-directory))
   (setq session-name-disable-regexp "\\(?:\\`'/tmp\\|\\.git/[A-Z_]+\\'\\)")
   (setq session-save-file-coding-system 'utf-8)
-  :hook
-  ((after-init . session-initialize)
-   (;; save all shell-mode buffers
-    (shell-mode
-      . (lambda ()
-          (setq-local desktop-save-buffer #'my-save-shell-buffer))))))
+  (session-initialize))
 
 ;;; A simple visible bell which works in all terminal types
 ;; (use-package mode-line-bell
@@ -1014,9 +1012,9 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (beacon-color "DarkGoldenrod2")
   (beacon-size 10)
   (beacon-blink-when-window-scrolls nil)
-  :hook (after-init . beacon-mode)
   :config
   (message "init.el: loaded beacon")
+  (beacon-mode 1)
   ) ;; beacon mode
 
 ;;; Iedit mode
@@ -1073,11 +1071,10 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
           ("M-7" . #'winum-select-window-7)
           ("M-8" . #'winum-select-window-8)
           ("M-9" . #'winum-select-window-9))
-  :hook (after-init . winum-mode)
   :config
   (message "init.el: loaded winum")
   ;; (setq winum-auto-setup-mode-line t)
-  ;; (winum-mode)
+  (winum-mode)
   ) ;; winum-mode
 
 (use-package find-dired
@@ -1132,10 +1129,11 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 
 (use-package evil
-  :hook (after-init . evil-mode)
-  :config
+  :init
   (setq evil-want-integration t)
   (setq evil-want-keybinding nil)
+  :config
+  (evil-mode 1)
   (setq
    ;; evil-respect-visual-line-mode t
    evil-cross-lines t
