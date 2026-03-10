@@ -828,7 +828,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
   (setq register-preview-delay 0
         register-preview-function #'consult-register-format)
-  (setq consult-preview-key '(:debounce 0.2 any)
+  (setq consult-preview-key '(:debounce 1 any)
         consult-narrow-key "<"
         consult-project-root-function #'projectile-project-root)
   ) ;; consult
@@ -1398,6 +1398,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   :hook (lean4-mode . indent-bars-mode)
   :custom
   (indent-bars-treesit-support nil)   ; lean4 has no treesit grammar yet
+  (indent-bars-prefer-character t)    ; NS backend doesn't support stipples
   (indent-bars-width-frac 0.2)
   (indent-bars-pad-frac 0.1)
   (indent-bars-color '(highlight :face-bg t :blend 0.4)))
