@@ -442,15 +442,9 @@ this stage of initialization."
 
 (setq use-package-minimum-reported-time (if my-emacs-debug 0 0.1))
 (setq use-package-verbose my-emacs-debug)
-(setq package-enable-at-startup nil)  ; Let the init.el file handle this
+(setq package-enable-at-startup nil)  ; elpaca manages packages
 (setq use-package-always-ensure t)
 (setq use-package-enable-imenu-support t)
-(setq package-archives '(("melpa" . "https://melpa.org/packages/")
-                         ("gnu" . "https://elpa.gnu.org/packages/")
-                         ("nongnu" . "https://elpa.nongnu.org/nongnu/")))
-(setq package-archive-priorities '(("gnu"    . 99)
-                                   ("nongnu" . 80)
-                                   ("melpa"  . 70)))
 
 ;;; Load post-early-init.el
 (my-emacs-load-user-init "post-early-init.el")
