@@ -15,3 +15,8 @@
 /agent/
 /.session
 /auto-save-files/
+/.cache/
+/tramp-autosave/
+/tramp-rpc/
+/tree-sitter/
+*.elc
