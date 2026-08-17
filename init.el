@@ -1294,9 +1294,107 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 ;;   (load "~/Code/HOL/tools/hol-mode")
 ;;   (load "~/Code/HOL/tools/hol-unicode"))
 
+;;; OCaml
+
+;; No opam switch is on `exec-path' -- the login shell does not run `opam env'
+;; -- and putting one there would be wrong anyway, because the two switches in
+;; use are not interchangeable: `default' (OCaml 5.4.1) holds ocaml-lsp-server,
+;; ocamlformat and utop, while ~/Code/hol-light carries a local switch (5.4.0 +
+;; camlp5) that HOL Light is built against and has to run in.  So every OCaml
+;; program below is launched through `opam exec --', which resolves the switch
+;; from the process's working directory and therefore picks the right one per
+;; tree, with no switching by hand.  `opam-switch-mode' covers the rest.
+
+(use-package tuareg
+  :mode (("\\.ml\\'" . tuareg-mode)
+         ("\\.mli\\'" . tuareg-interface-mode))
+  :preface
+  (defun my-ocaml-setup ()
+    "Set up the OCaml tooling that HOL Light sources must not get.
+`hol-light-tuareg-setup' claims those buffers instead: ocamllsp cannot parse
+their camlp5 term quotations, and utop is a plain OCaml toplevel where HOL
+Light needs the one its own `make' produces."
+    (unless (hol-light-file-p)
+      (utop-minor-mode)
+      ;; ocamllsp resolves modules out of dune's build metadata, and is little
+      ;; more than a syntax checker without it.
+      (when (and buffer-file-name
+                 (locate-dominating-file buffer-file-name "dune-project"))
+        (eglot-ensure))))
+  :hook (tuareg-mode . my-ocaml-setup)
+  :config
+  (message "init.el: loaded tuareg")
+  (setq tuareg-interactive-program "opam exec -- ocaml -nopromptcont")
+
+  ;; Restate eglot's OCaml entry rather than edit it, so the `:language-id'
+  ;; properties ocamllsp expects survive; `add-to-list' puts this ahead of the
+  ;; built-in one, which would look for a bare `ocamllsp' on `exec-path'.
+  ;; Interface (.mli) buffers match through `tuareg-mode', which
+  ;; `tuareg-interface-mode' derives from.
+  (with-eval-after-load 'eglot
+    (add-to-list 'eglot-server-programs
+                 '(((caml-mode :language-id "ocaml")
+                    (ocaml-ts-mode :language-id "ocaml")
+                    (tuareg-mode :language-id "ocaml"))
+                   "opam" "exec" "--" "ocamllsp")))
+  ) ;; tuareg
+
+(use-package utop
+  :defer t
+  :config
+  (message "init.el: loaded utop")
+  (setq utop-command "opam exec -- utop -emacs")
+  ;; Skip the "utop command:" prompt on every start -- the wrapper above already
+  ;; selects the switch belonging to the buffer's project.
+  (setq utop-edit-command nil)
+  ) ;; utop
+
+(use-package dune
+  :mode ("\\(?:\\`\\|/\\)dune\\(?:\\.inc\\|-project\\|-workspace\\)?\\'" . dune-mode)
+  :config
+  (message "init.el: loaded dune")
+  (setq dune-command "opam exec -- dune")
+  ) ;; dune
+
+;; For the occasional buffer whose switch cannot be inferred from its directory:
+;; `opam-switch-set-switch' fixes up `exec-path' and `process-environment'.
+(use-package opam-switch-mode
+  :commands (opam-switch-mode opam-switch-set-switch)
+  :config
+  (message "init.el: loaded opam-switch-mode"))
+
+;;; HOL Light
+
+;; HOL Light sources are OCaml, so `tuareg-mode' edits them; `hol-light-mode'
+;; (elisp/hol-light.el) adds the toplevel, the statement/goal/tactic stepping,
+;; HOL Light's own Help documentation through eldoc, and \\[xref-find-definitions]
+;; over the tree, for files under ~/Code/hol-light.
+(use-package hol-light
+  :ensure nil
+  :commands (hol-light-run hol-light-mode hol-light-file-p)
+  :preface
+  (defun my-hol-light-eldoc-box ()
+    "Show HOL Light's documentation in a childframe, as for lean4 and Verilog.
+A minor mode's hook runs when it is switched off as well as on, hence the
+test rather than a bare `eldoc-box-hover-mode'."
+    (eldoc-box-hover-mode (if hol-light-mode 1 -1)))
+  :hook ((tuareg-mode . hol-light-tuareg-setup)
+         (hol-light-mode . my-hol-light-eldoc-box))
+  :config
+  (message "init.el: loaded hol-light"))
+
 ;; Verilog
 (use-package verilog-ts-mode
-  :mode "\\.s?vh?\\'")
+  :mode "\\.s?vh?\\'"
+  :bind (:map verilog-ts-mode-map
+              ;; Override electric-verilog-* fns inherited from verilog-mode-map
+              ;; that reindent using `verilog-indent-level' instead of the
+              ;; tree-sitter rules. Fall back to plain insertion + electric-indent-mode.
+              ("RET" . newline)
+              (";"   . self-insert-command)
+              (":"   . self-insert-command)
+              ("`"   . self-insert-command)))
+
 (use-package verilog-ext
   :hook ((verilog-mode . verilog-ext-mode))
   :config
