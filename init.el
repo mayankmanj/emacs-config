@@ -72,6 +72,8 @@
 (eval-and-compile
   (setq use-package-verbose (not (bound-and-true-p byte-compile-current-file))))
 
+(use-package compat)
+
 (use-package emacs
   :ensure nil
   :config
@@ -155,6 +157,7 @@
   (setq backup-directory-alist
         `(("." . ,(expand-file-name "backup" user-emacs-directory))))
   (setq tramp-backup-directory-alist backup-directory-alist)
+  (setq tramp-histfile-override "~/.tramp_history")
   (setq backup-by-copying-when-linked t)
   (setq backup-by-copying t)            ; Backup by copying rather renaming
   (setq delete-old-versions t)          ; Delete excess backup versions silently
@@ -182,6 +185,11 @@
         (expand-file-name "autosave/" user-emacs-directory))
   (setq tramp-auto-save-directory
         (expand-file-name "tramp-autosave/" user-emacs-directory))
+
+  ;; Disable auto-save for remote (TRAMP) files — auto-saving over the
+  ;; network is slow and can stall the UI on flaky connections.
+  (setq remote-file-name-inhibit-auto-save t)
+  (setq remote-file-name-inhibit-auto-save-visited t)
 
   ;; Auto save options
   ;; (setq kill-buffer-delete-auto-save-files t)
@@ -296,7 +304,8 @@
   ;; middle of a word.
   (setq-default word-wrap t)
 
-  ;; Disable wrapping by default due to its performance cost.
+  ;; Truncate long lines everywhere, including text modes. Nothing soft-wraps
+  ;; by default; toggle per buffer with `M-x visual-line-mode' (C-c w).
   (setq-default truncate-lines t)
 
   ;; If enabled and `truncate-lines' is disabled, soft wrapping will not occur
@@ -491,6 +500,9 @@
 
   (setq epa-pinentry-mode 'loopback)
 
+  (with-eval-after-load 'isearch
+    (setq search-upper-case t))
+  
   (defun my-cleanup-on-save ()
     "Clean up whitespace before saving. Only runs in prog/text modes.
 Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
@@ -498,10 +510,10 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
       (unless indent-tabs-mode
         (untabify (point-min) (point-max)))
       (whitespace-cleanup)))
-
-  (add-hook 'before-save-hook 'my-cleanup-on-save)
-
-  ;; (server-start)
+  
+  ;; (add-hook 'before-save-hook 'my-cleanup-on-save)
+  
+  (server-start)
   ) ;; Emacs
 
 (use-package paren
@@ -529,14 +541,115 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (setq-default display-line-numbers-widen t)
   ) ;; display-line-numbers
 
+;; Indent soft-wrapped continuation lines to match their original line's
+;; leading whitespace, so wrapped text doesn't reset to column 0.
+(use-package adaptive-wrap
+  :hook (visual-line-mode . adaptive-wrap-prefix-mode))
+
 (use-package tramp
-  :ensure nil
+  ;; Install tramp from GNU ELPA (2.8.x) instead of the older built-in
+  ;; (2.7.3.x): `tramp-rpc' below requires tramp >= 2.8.1.4.
+  :ensure t
   :config
   (message "init.el: loaded tramp")
   (setq tramp-verbose 1)
   (setq tramp-completion-reread-directory-timeout 50)
   (setq remote-file-name-inhibit-cache 50)
+  ;; Use the remote user's own $PATH so executables like `seg-prompt' are
+  ;; found in TRAMP shells, instead of TRAMP's minimal hardcoded path.
+  (add-to-list 'tramp-remote-path 'tramp-own-remote-path)
+  ;; TRAMP defaults to LC_CTYPE='' which perl and friends reject on some
+  ;; hosts. Force a valid UTF-8 locale instead.
+  (setq tramp-remote-process-environment
+        (cons "LC_CTYPE=en_US.UTF-8"
+              (seq-remove (lambda (s) (string-prefix-p "LC_CTYPE=" s))
+                          tramp-remote-process-environment)))
+  ;; Disable VC for remote files. VC's find-file and after-save hooks call out
+  ;; to git to refresh state, which is slow over TRAMP and contributes to the
+  ;; per-keystroke lag when editing large remote buffers.
+  (setq vc-ignore-dir-regexp
+        (format "%s\\|%s" vc-ignore-dir-regexp tramp-file-name-regexp))
+  ;; Default `M-x shell' on myvm to tcsh, so it stops prompting for the shell
+  ;; path with /bin/sh as the default. Scoped to that one host.
+  ;; NOTE: only `explicit-shell-file-name' should be tcsh -- that's what
+  ;; `M-x shell' reads. Keep `shell-file-name' POSIX (/bin/sh): TRAMP uses it
+  ;; for `process-file'/`shell-command' AND eglot wraps remote LSP servers as
+  ;; `shell-file-name -c "..."'. Pointing it at tcsh breaks those (csh syntax)
+  ;; and leaks the tcsh login banner into eglot's stdio channel.
+  (connection-local-set-profile-variables
+   'myvm-tcsh
+   '((explicit-shell-file-name . "/bin/tcsh")
+     (explicit-tcsh-args . nil)
+     (shell-file-name . "/bin/sh")
+     (shell-command-switch . "-c")))
+  (connection-local-set-profiles
+   '(:machine "myvm") 'myvm-tcsh)
   ) ;; tramp
+
+;;; tramp-rpc — fast TRAMP backend over a binary (MessagePack) RPC server.
+;; Edit remote files with the "rpc" method, e.g. /rpc:user@host:/path/to/file
+;; Requires tramp >= 2.8.1.4 (installed from GNU ELPA above); the `msgpack'
+;; dependency is pulled in automatically by elpaca. On the first connection to
+;; a host, tramp-rpc auto-deploys a ~850KB Rust server binary there — built
+;; locally with cargo if it is installed, otherwise downloaded from the
+;; project's GitHub releases. See M-x tramp-rpc-deploy-status.
+(use-package tramp-rpc
+  :ensure (:host github :repo "ArthurHeymans/emacs-tramp-rpc"
+           :files ("lisp/*.el"))
+  :after tramp
+  :config
+  (message "init.el: loaded tramp-rpc")
+  ;; We install tramp-rpc from a git checkout (elpaca), whose default deploy
+  ;; policy builds the Rust server from source and never falls back to release
+  ;; binaries. Cross-building an x86_64-linux server on this macOS machine would
+  ;; need a cross-compilation toolchain, so download the prebuilt binary from
+  ;; the project's GitHub releases instead.
+  (setq tramp-rpc-deploy-git-build-policy 'release)
+
+  ;; --- Make site CE/p4 tools work over the rpc method on myvm ---------------
+  ;; The site CommonEnv (CE) environment (PATH->p4, GLOBAL_PATH, P4CONFIG, ...)
+  ;; is only established by a tcsh LOGIN shell.  tramp-rpc launches its Rust
+  ;; server with `ssh host <binary>' -- a NON-login `tcsh -c' -- so the server,
+  ;; and every process.run child (p4 included), inherits none of it.  Two fixes
+  ;; (both hook tramp-rpc internals, so revisit on package updates):
+  ;;  1. Launch the server through ~/.local/bin/tramp-rpc-login-launch, a /bin/sh
+  ;;     wrapper that captures the tcsh login env (via `tcsh -l' on stdin -- tcsh
+  ;;     rejects `-l -c' and a `#!/bin/tcsh -l' shebang) and re-execs the server;
+  ;;     children then inherit GLOBAL_PATH/P4CONFIG (the server merges its env).
+  ;;  2. tramp-rpc's own `tramp-own-remote-path' probe also uses the broken
+  ;;     `tcsh -l -c'; override it to feed `tcsh -l' on stdin so the computed
+  ;;     remote PATH includes the site tool dir (.../daily/bin).
+  ;; (p4 additionally must run as a child of a shell -- see `p4-executable-remote'.)
+  (defun my-tramp-rpc-login-env-launch (orig vec binary-path &rest rest)
+    "Launch the tramp-rpc server under a tcsh login env on myvm."
+    (if (and (equal (tramp-file-name-method vec) "rpc")
+             (equal (tramp-file-name-host vec) "myvm"))
+        (apply orig vec
+               (concat "/home/mayankm/.local/bin/tramp-rpc-login-launch " binary-path)
+               rest)
+      (apply orig vec binary-path rest)))
+  (advice-add 'tramp-rpc--start-server-process :around #'my-tramp-rpc-login-env-launch)
+
+  (defun my-tramp-rpc-fetch-remote-exec-path (vec)
+    "Fetch the remote login PATH via `<login-shell> -l' reading stdin.
+tcsh rejects `-l -c' (what upstream uses); feeding commands on stdin is the only
+form that sources the login files, so `tramp-own-remote-path' sees the real PATH."
+    (condition-case nil
+        (let* ((marker (md5 (format "trpc-path-%s" (float-time))))
+               (shell (tramp-rpc--get-remote-login-shell vec))
+               (result (tramp-rpc--call vec "process.run"
+                         `((cmd . ,shell)
+                           (args . ["-l"])
+                           (cwd . "/")
+                           (stdin . ,(format "echo %s\nprintenv PATH\n" marker)))))
+               (stdout (tramp-rpc--decode-output
+                        (alist-get 'stdout result)
+                        (alist-get 'stdout_encoding result))))
+          (when (and stdout
+                     (string-match (concat (regexp-quote marker) "\r?\n\\([^\r\n]+\\)") stdout))
+            (split-string (string-trim (match-string 1 stdout)) ":" t)))
+      (error nil)))
+  (advice-add 'tramp-rpc--fetch-remote-exec-path :override #'my-tramp-rpc-fetch-remote-exec-path))
 
 ;; Automatically rescan the buffer for Imenu entries when `imenu' is invoked
 ;; This ensures the index reflects recent edits.
@@ -608,6 +721,13 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (setq savehist-file (expand-file-name "savehist" user-emacs-directory))
   (setq history-delete-duplicates t)
   (savehist-mode 1)
+  ;; savehist-autosave is a timer that fires regardless of the current buffer.
+  ;; If a TRAMP buffer is active, the inherited remote default-directory causes
+  ;; savehist-save to stat buffer names (e.g. *scratch*) as remote paths.
+  (advice-add 'savehist-autosave :around
+              (lambda (orig &rest args)
+                (let ((default-directory temporary-file-directory))
+                  (apply orig args))))
   ) ;; savehist
 
 ;;; Ediff
@@ -630,7 +750,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
     (set-window-configuration my-ediff-last-windows))
 
   (add-hook 'ediff-before-setup-hook #'my-store-pre-ediff-winconfig)
-  (add-hook 'ediff-quit-hook #'my-restore-pre-ediff-winconfig)
+  (add-hook 'ediff-quit-hook #'my-restore-pre-ediff-winconfig 90)
   ) ;; ediff
 
 ;;; Eglot
@@ -660,6 +780,8 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
     (setq eglot-events-buffer-config '(:size 0 :format short)))
 
   (setq eglot-report-progress my-emacs-debug)  ; Prevent minibuffer spam
+  ;; Pop the eldoc buffer on demand (hover docs + any diagnostic at point).
+  (keymap-set eglot-mode-map "C-c d" #'eldoc-doc-buffer)
   ) ;; eglot
 
 ;;; Flymake
@@ -831,6 +953,27 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (setq consult-preview-key '(:debounce 1 any)
         consult-narrow-key "<"
         consult-project-root-function #'projectile-project-root)
+  (setq consult-preview-key "M-.")
+
+  ;; In remote (TRAMP) buffers, drop the project sources entirely — they call
+  ;; projectile-project-root and iterate recentf-list for project membership,
+  ;; both of which are slow over SSH even with non-essential set. Also rebind
+  ;; `default-directory' to a local path so marginalia annotators and other
+  ;; completion machinery don't make TRAMP round-trips while building/showing
+  ;; candidates.
+  (advice-add 'consult-buffer :around
+              (lambda (orig &rest args)
+                (if (file-remote-p default-directory)
+                    (let ((consult-buffer-sources
+                           (seq-remove (lambda (src)
+                                         (memq src '(consult--source-project-buffer
+                                                     consult--source-project-buffer-hidden
+                                                     consult--source-project-recent-file)))
+                                       consult-buffer-sources))
+                          (default-directory temporary-file-directory)
+                          (non-essential t))
+                      (apply orig args))
+                    (apply orig args))))
   ) ;; consult
 
 ;; Enable rich annotations using the Marginalia package
@@ -945,7 +1088,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (which-key-mode)
   ) ;; which-key
 
-;;; Modus-themes
+;; Modus-themes
 (use-package modus-themes
   :config
   (message "init.el: loaded modus-themes")
@@ -968,29 +1111,44 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (add-hook 'server-after-make-frame-hook #'my-set-font)
   (my-set-font)
  )  ;; modus-theme
+;; (use-package gruvbox-theme
+;;   :ensure t
+;;   :config
+;;   (load-theme 'gruvbox-dark-soft t)
+;;
+;;
+;;   ;; fonts
+;;   (defun my-set-font ()
+;;     (set-face-attribute 'default nil
+;;                         :font "JetBrainsMono Nerd Font:pixelsize=14:weight=semi-bold:slant=normal:width=normal:spacing=0:scalable=true"))
+;;
+;;   (add-hook 'server-after-make-frame-hook #'my-set-font)
+;;   (my-set-font)
+;;   )
 
 
-(use-package doom-modeline
-  :config
-  (doom-modeline-mode 1)
-  (setq doom-modeline-height 1)
 
-  (setq nerd-icons-scale-factor 1.2)
-  ;; *Messages* is created before doom-modeline loads, so its modeline
-  ;; is never set via hooks — force it here.
-  (with-current-buffer "*Messages*"
-    (doom-modeline-set-main-modeline))
-
-  ;; Match evil state indicator colors to cursor colors.
-  ;; Dark backgrounds (maroon, sea-green, midnight-blue) get white fg;
-  ;; orange gets black fg for contrast.
-  (set-face-attribute 'doom-modeline-evil-normal-state   nil :background "maroon"       :foreground "white")
-  (set-face-attribute 'doom-modeline-evil-insert-state   nil :background "sea green"    :foreground "white")
-  (set-face-attribute 'doom-modeline-evil-visual-state   nil :background "midnight blue" :foreground "white")
-  (set-face-attribute 'doom-modeline-evil-motion-state   nil :background "orange"       :foreground "black")
-  (set-face-attribute 'doom-modeline-evil-operator-state nil :background "orange"       :foreground "black")
-  (set-face-attribute 'doom-modeline-evil-emacs-state    nil :background "gray40"       :foreground "white"))
-
+;; (use-package doom-modeline
+;;   :config
+;;   (doom-modeline-mode 1)
+;;   (setq doom-modeline-height 1)
+;;
+;;   (setq nerd-icons-scale-factor 1.2)
+;;   ;; *Messages* is created before doom-modeline loads, so its modeline
+;;   ;; is never set via hooks — force it here.
+;;   (with-current-buffer "*Messages*"
+;;     (doom-modeline-set-main-modeline))
+;;
+;;   ;; Match evil state indicator colors to cursor colors.
+;;   ;; Dark backgrounds (maroon, sea-green, midnight-blue) get white fg;
+;;   ;; orange gets black fg for contrast.
+;;   ;; (set-face-attribute 'doom-modeline-evil-normal-state   nil :background "maroon"       :foreground "white")
+;;   ;; (set-face-attribute 'doom-modeline-evil-insert-state   nil :background "sea green"    :foreground "white")
+;;   ;; (set-face-attribute 'doom-modeline-evil-visual-state   nil :background "midnight blue" :foreground "white")
+;;   ;; (set-face-attribute 'doom-modeline-evil-motion-state   nil :background "orange"       :foreground "black")
+;;   ;; (set-face-attribute 'doom-modeline-evil-operator-state nil :background "orange"       :foreground "black")
+;;   ;; (set-face-attribute 'doom-modeline-evil-emacs-state    nil :background "gray40"       :foreground "white")
+;;   )
 
 (use-package session
   :preface
@@ -1071,7 +1229,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   :bind (:map winum-keymap
           ("C-`" . #'winum-select-window-by-number)
           ("C-²" . #'winum-select-window-by-number)
-          ("M-0" . #'winum-select-window-0-or-10)
+          ("M-0" . #'treemacs-select-window)
           ("M-1" . #'winum-select-window-1)
           ("M-2" . #'winum-select-window-2)
           ("M-3" . #'winum-select-window-3)
@@ -1121,10 +1279,16 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
 (use-package git-gutter
   :diminish
-  :hook (prog-mode . git-gutter-mode)
+  :hook (prog-mode . my-maybe-enable-git-gutter)
   :config
   (message "init.el: loaded git-gutter")
   (setq git-gutter:update-interval 0)
+  ;; Skip git-gutter in TRAMP buffers — with update-interval 0 it shells out
+  ;; to `git diff' after every change, which is a remote SSH round-trip per
+  ;; keystroke and makes editing large remote files unusable.
+  (defun my-maybe-enable-git-gutter ()
+    (unless (file-remote-p default-directory)
+      (git-gutter-mode 1)))
   ) ;; git-gutter
 
 (use-package git-gutter-fringe
@@ -1137,6 +1301,16 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (set-face-foreground  'git-gutter-fr:modified "orange1")
   ) ;; git-gutter-fringe
 
+;; Perforce:
+(add-to-list 'load-path "~/Code/perforce-emacs")
+(require 'p4)
+;; On myvm the site `p4' is a CommonEnv wrapper that only behaves when spawned
+;; as a child of a shell -- run directly by the tramp-rpc server it cd's to $HOME
+;; and loses the client.  Route remote p4 through ~/.local/bin/p4-rpc
+;; (#!/bin/sh; p4 "$@"), so p4 is a shell child.  Its CE env + PATH come from the
+;; tramp-rpc server-launch/PATH fixes above.  Local p4 uses `p4-executable' and
+;; is unaffected; this only applies when `default-directory' is remote.
+(setq p4-executable-remote "/home/mayankm/.local/bin/p4-rpc")
 
 (use-package evil
   :init
@@ -1155,6 +1329,7 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (evil-set-undo-system 'undo-tree)
   (dolist (mode '(acl2-doc-mode
                   eshell-mode
+                  dired-mode
                   shell-mode
                   neotree-mode
                   term-mode))
@@ -1163,12 +1338,12 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
     (evil-set-initial-state mode 'normal))
 
   (setq evil-mode-line-format '(before . mode-line-front-space))
-  (setq evil-emacs-state-cursor   '(bar . 3))
-  (setq evil-normal-state-cursor  '("maroon" (bar . 4)))
-  (setq evil-insert-state-cursor  '("sea green" (bar . 4)))
-  (setq evil-visual-state-cursor  '("midnight blue" (bar . 4)))
-  (setq evil-motion-state-cursor  '("orange" (bar . 4)))
-  (setq evil-operator-state-cursor '("orange" (bar . 4)))
+  ;; (setq evil-emacs-state-cursor   'box)
+  (setq evil-normal-state-cursor  '("maroon" box))
+  ;; (setq evil-insert-state-cursor  '("sea green" box))
+  ;; (setq evil-visual-state-cursor  '("midnight blue" box))
+  ;; (setq evil-motion-state-cursor  '("orange" box))
+  ;; (setq evil-operator-state-cursor '("orange" box))
 
   (evil-define-key '(normal insert motion) 'global (kbd "C-t") nil)
   (evil-define-key '(normal insert motion) 'global (kbd "C-w") nil)
@@ -1180,15 +1355,16 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
                    (kbd "<leader>bb") #'consult-buffer)
   (evil-define-key 'insert 'global
                    (kbd "C-y") nil)
-  (with-eval-after-load 'magit
-    (evil-define-key 'normal magit-status-mode-map (kbd "M-1") nil)
-    (evil-define-key 'normal magit-section-mode-map (kbd "M-1") nil)
-    (evil-define-key 'normal magit-status-mode-map (kbd "M-2") nil)
-    (evil-define-key 'normal magit-section-mode-map (kbd "M-2") nil)
-    (evil-define-key 'normal magit-status-mode-map (kbd "M-3") nil)
-    (evil-define-key 'normal magit-section-mode-map (kbd "M-3") nil)
-    (evil-define-key 'normal magit-status-mode-map (kbd "M-4") nil)
-    (evil-define-key 'normal magit-section-mode-map (kbd "M-4") nil))
+
+  ;; (with-eval-after-load 'magit
+  ;;   (evil-define-key 'normal magit-status-mode-map (kbd "M-1") nil)
+  ;;   (evil-define-key 'normal magit-section-mode-map (kbd "M-1") nil)
+  ;;   (evil-define-key 'normal magit-status-mode-map (kbd "M-2") nil)
+  ;;   (evil-define-key 'normal magit-section-mode-map (kbd "M-2") nil)
+  ;;   (evil-define-key 'normal magit-status-mode-map (kbd "M-3") nil)
+  ;;   (evil-define-key 'normal magit-section-mode-map (kbd "M-3") nil)
+  ;;   (evil-define-key 'normal magit-status-mode-map (kbd "M-4") nil)
+  ;;   (evil-define-key 'normal magit-section-mode-map (kbd "M-4") nil))
    (evil-define-key 'insert 'global
                    (kbd "S-<right>") nil)
   (evil-define-key 'insert 'global
@@ -1207,9 +1383,18 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
 
   )
 
-(use-package evil-emacs-cursor-model-mode
-  :config
-  (evil-emacs-cursor-model-mode 1))
+(unless (display-graphic-p)
+  (use-package evil-terminal-cursor-changer
+    :init
+    (message "init.el: loaded evil-terminal-cursor-changer")
+    (evil-terminal-cursor-changer-activate)
+    ))
+
+(unless (display-graphic-p)
+  (use-package clipetty
+    :config
+    (global-clipetty-mode)))
+
 
 ;; (use-package evil-collection
 ;;   :diminish
@@ -1234,58 +1419,64 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   (add-hook 'emacs-startup-hook #'easysession-save-mode 103))
 
 ;;;;;;;;; Programming languages
-(use-package auctex
-  ;; :mode "\\.tex\\'"
-  :config
-  (message "init.el: loaded auctex")
-  (setq TeX-view-program-selection '((output-pdf "displayline")))
+;; (use-package auctex
+;;   ;; :mode "\\.tex\\'"
+;;   :config
+;;   (message "init.el: loaded auctex")
+;;   (setq TeX-view-program-selection '((output-pdf "displayline")))
+;;
+;;   (setq TeX-view-program-list
+;;         '(("displayline"
+;;            "/Applications/Skim.app/Contents/SharedSupport/displayline -g %n %o %b"))))
 
-  (setq TeX-view-program-list
-        '(("displayline"
-           "/Applications/Skim.app/Contents/SharedSupport/displayline -g %n %o %b"))))
+;; (use-package markdown-mode
+;;   :if macos-p
+;;   :mode ("\\.\\(njk\\|md\\)\\'" . markdown-mode)
+;;   :config
+;;   (message "init.el: loaded markdown"))
 
-(use-package markdown-mode
-  :if macos-p
-  :mode ("\\.\\(njk\\|md\\)\\'" . markdown-mode)
-  :config
-  (message "init.el: loaded markdown"))
-
-(use-package tree-sitter
-  :diminish
-  :config
-  (message "init.el: loaded tree-sitter")
-  (global-tree-sitter-mode))
-(use-package tree-sitter-langs
-  :config
-  (message "init.el: loaded tree-sitter-langs"))
 (use-package treesit-auto
   :custom
   (treesit-auto-install 'prompt)
   :config
   (message "init.el: loaded treesit-auto")
+  ;; Persist the install dir on `treesit-extra-load-path'. treesit-auto
+  ;; installs grammars under ~/.config/emacs/tree-sitter/ but Emacs only
+  ;; auto-searches treesit-extra-load-path + system paths, so without this
+  ;; treesit-auto re-prompts to install every session.
+  (add-to-list 'treesit-extra-load-path
+               (expand-file-name "tree-sitter/" user-emacs-directory))
+  ;; Exclude verilog/systemverilog from treesit-auto. Its recipe installs the
+  ;; grammar under symbol `verilog' (file libtree-sitter-verilog.dylib), but
+  ;; the upstream grammar exports `tree_sitter_systemverilog' and
+  ;; `verilog-ts-mode' looks up the `systemverilog' symbol. The mismatch makes
+  ;; treesit-auto think the grammar is missing on every .sv open and re-prompt
+  ;; to install. verilog-ts-mode ships its own `verilog-ts-install-grammar'
+  ;; which installs under the correct symbol.
+  (setq treesit-auto-langs
+        (seq-remove (lambda (r) (memq (treesit-auto-recipe-lang r) '(verilog systemverilog)))
+                    treesit-auto-langs))
   (treesit-auto-add-to-auto-mode-alist 'all)
   (global-treesit-auto-mode))
-
-
 
 (use-package session-async
   :if macos-p)
 
 ;;; YAML
-(use-package yaml-mode
-  :if macos-p
-  :mode "\\.yml\\'")
+;; (use-package yaml-mode
+;;   :if macos-p
+;;   :mode "\\.yml\\'")
 
 ;;; ACL2
 
-(use-package init-acl2
-  :if macos-p
-  :ensure nil
-  :hook ((lisp-mode . acl2-lisp-mode))
-  :config
-  (message "init.el: loaded acl2")
-  ;; :mode ("\\.lisp\\'" . lisp-mode)
-  )
+;; (use-package init-acl2
+;;   :if macos-p
+;;   :ensure nil
+;;   :hook ((lisp-mode . acl2-lisp-mode))
+;;   :config
+;;   (message "init.el: loaded acl2")
+;;   ;; :mode ("\\.lisp\\'" . lisp-mode)
+;;   )
 
 ;;; HOL4
 ;; (use-package sml-mode
@@ -1406,7 +1597,7 @@ test rather than a bare `eldoc-box-hover-mode'."
           xref
           ;; capf
           hierarchy
-          eglot
+          ;; eglot   ; disabled -- see the note below (svlangserver removed)
           ;; lsp
           ;; lsp-bridge
           ;; lspce
@@ -1421,13 +1612,53 @@ test rather than a bare `eldoc-box-hover-mode'."
           ;; hideshow
           ;; typedefs
           ;; time-stamp
-          block-end-comments
           ports))
-  (verilog-ext-mode-setup)
+  ;; Run the setup in a throwaway (non-Verilog) buffer.
+  ;; `verilog-ext-mode-setup' calls `verilog-ext-flycheck-set-linter', which does
+  ;; `flycheck-select-checker' whenever the current buffer is a Verilog buffer.
+  ;; Under elpaca's deferred loading this :config runs the first time a Verilog
+  ;; file is opened -- i.e. while that buffer is current -- so if the linter's
+  ;; executable is missing (no `verilator' on PATH, or a remote TRAMP file where
+  ;; flycheck cannot run command checkers) checker selection signals "Can't use
+  ;; syntax checker ...", aborting mode setup as a "File mode specification error".
+  ;; A `fundamental-mode' temp buffer makes that guard false, so setup completes
+  ;; and `verilog-ext-mode' still enables normally when files are visited.
+  (with-temp-buffer
+    (verilog-ext-mode-setup))
+  ;; --- No LSP for Verilog ---
+  ;; svlangserver (via eglot) was removed deliberately.  It is a whole-tree
+  ;; static indexer, and this FV flow defeats it: the design hierarchy is
+  ;; elaborated by JasperGold, so cross-module references like
+  ;;   l2c.pip2.pipinst.`EPRB_PATH.prbpickctl.wabPipReqVld
+  ;; are unresolvable -- svlangserver's `getHierarchicalSymbol' only resolves a
+  ;; dotted path whose first element is a symbol in the current file or a
+  ;; module/interface name, and `l2c' is an elaboration-time instance declared
+  ;; in another file.  Indexing the tree also cost hours and produced a
+  ;; multi-hundred-MB index that wedged the server.  The `eglot' entry in
+  ;; `verilog-ext-feature-list' above is disabled to match.
+  ;;
+  ;; Still available without LSP: verilog-ext's own `xref' backend and
+  ;; `hierarchy'/`navigation' features, imenu, and plain grep/ripgrep.
+
+  ;; Treat `soko/trunk' as the project root for HDL buffers.  Independent of
+  ;; LSP -- this is what makes project.el, `consult-ripgrep', and verilog-ext
+  ;; navigation search the whole design instead of a single leaf directory.
+  ;; Workspace-prefix agnostic: any Perforce client (mm_aus_soko_pip.Wtmp,
+  ;; pip2.Wtmp, ...) resolves by walking up to `soko/trunk'.
+  (defun my-soko-trunk-root (dir)
+    "Return the enclosing .../soko/trunk/ directory of DIR, or nil."
+    (when (and dir (string-match "\\(.*/soko/trunk\\)/" dir))
+      (file-name-as-directory (match-string 1 dir))))
+  (defun my-soko-project-try (dir)
+    "`project-find-functions' entry: treat soko/trunk as the root for HDL buffers."
+    (when (and (derived-mode-p 'verilog-mode 'verilog-ts-mode)
+               (my-soko-trunk-root dir))
+      (cons 'transient (my-soko-trunk-root dir))))
+  (add-hook 'project-find-functions #'my-soko-project-try 90)
   )
 
 (use-package lean4-mode
-  :ensure (:url "git@github.com:mayankmanj/lean4-mode.git"
+  :ensure (:url "https://github.com/mayankmanj/lean4-mode.git"
            :branch "eglot-r"
            :files ("*.el" "data"))
   :commands (lean4-mode)
@@ -1486,274 +1717,117 @@ test rather than a bare `eldoc-box-hover-mode'."
   (indent-bars-color '(highlight :face-bg t :blend 0.4)))
 
 (use-package eldoc-box
-  :hook (((lean4-info-mode) . eldoc-box-hover-mode)))
-
-
-;; AI Config
-(use-package gptel
-  :commands (gptel gptel-send)
-  :bind
-  (("C-c RET" . gptel-send))
-  :config
-  (message "init.el: loaded gptel")
-  (setq gptel-curl-extra-args '("-k"))
-  ;; (setq gptel-curl-extra-args nil)
-  (setq gptel-backend
-        (gptel-make-openai "arm-proxy"
-          :host "openai-api-proxy.geo.arm.com"
-          :endpoint "/api/providers/openai-us/v1/chat/completions"
-          :models '(gpt-5 gpt-thinking gpt-5-pro)
-          :key (let ((_ (auth-source-forget-all-cached))
-                     (entry (car (auth-source-search :host "openai-api-proxy.geo.arm.com" :user "mayank.manjrekar2@arm.com" :require '(:secret))))) ;
-                 (if entry
-                     (plist-get entry :secret)
-                   (error "API key not found. Please check your auth-source configuration.")))))
-
-  ;; Read a file
-  (gptel-make-tool
-   :name "read_file"
-   :function (lambda (file)
-               (unless (file-exists-p file)
-                 (error "error: file %s does not exist." file))
-               (with-temp-buffer
-                 (insert-file-contents file)
-                 (buffer-string)))
-   :description "return the contents of a file"
-   :args (list '(:name "file"
-                       :type string
-                       :description "the path of the file to be read"))
-   :category "file")
-
-  ;; Write a file
-  (gptel-make-tool
-   :name "write_file"
-   :function (lambda (file content)
-               (with-temp-file file
-                 (insert content)))
-   :description "write content to a file"
-   :args (list '(:name "file"
-                       :type string
-                       :description "the path of the file to write to")
-               '(:name "content"
-                       :type string
-                       :description "the content to be written to the file"))
-   :category "file")
-
-  ;; Read a buffer (this overlaps with your original example)
-  (gptel-make-tool
-   :name "read_buffer"
-   :function (lambda (buffer)
-               (unless (buffer-live-p (get-buffer buffer))
-                 (error "error: buffer %s is not live." buffer))
-               (with-current-buffer buffer
-                 (buffer-substring-no-properties (point-min) (point-max))))
-   :description "return the contents of an emacs buffer"
-   :args (list '(:name "buffer"
-                       :type string
-                       :description "the name of the buffer whose contents are to be retrieved"))
-   :category "emacs")
-
-  ;; Modify a buffer
-  (gptel-make-tool
-   :name "modify_buffer"
-   :function (lambda (buffer modification)
-               (unless (buffer-live-p (get-buffer buffer))
-                 (error "error: buffer %s is not live." buffer))
-               (with-current-buffer buffer
-                 (insert modification)))
-   :description "modify the contents of an emacs buffer by appending text"
-   :args (list '(:name "buffer"
-                       :type string
-                       :description "the name of the buffer to modify")
-               '(:name "modification"
-                       :type string
-                       :description "the text to append to the buffer"))
-   :category "emacs")
-
-  ;; Search a code base using ripgrep
-  (gptel-make-tool
-   :name "search_codebase"
-   :function (lambda (query directory)
-               (unless (executable-find "rg")
-                 (error "error: ripgrep is not installed."))
-               (let ((default-directory directory))
-                 (shell-command-to-string (format "rg %s" (shell-quote-argument query)))))
-   :description "search a code base using ripgrep"
-   :args (list '(:name "query"
-                       :type string
-                       :description "the search query")
-               '(:name "directory"
-                       :type string
-                       :description "the directory to search in"))
-   :category "search")
-
-  ;; Make a directory
-  (gptel-make-tool
-   :name "make_directory"
-   :function (lambda (directory)
-               (make-directory directory t))
-   :description "create a directory"
-   :args (list '(:name "directory"
-                       :type string
-                       :description "the path of the directory to create"))
-   :category "file")
-
-  ;; List files in a directory
-  (gptel-make-tool
-   :name "list_files"
-   :function (lambda (directory)
-               (unless (file-directory-p directory)
-                 (error "error: %s is not a directory." directory))
-               (directory-files directory nil nil t))
-   :description "list files in a directory"
-   :args (list '(:name "directory"
-                       :type string
-                       :description "the directory whose files are to be listed"))
-   :category "file")
-
-  ;; Tool for
-  (gptel-make-tool
-   :name "run_shell_command"
-   :function (lambda (cmd)
-               (shell-command-to-string cmd))
-   :description "run a shell command and return its output as a string"
-   :args (list '(:name "cmd"
-                       :type string
-                       :description "the shell command to be executed"))
-   :category "shell")
-
-
-  (gptel-make-tool
-   :name "search_replace_buffer"
-   :function (lambda (buffer search replace)
-               (unless (buffer-live-p (get-buffer buffer))
-                 (error "error: buffer %s is not live." buffer))
-               (with-current-buffer buffer
-                 (goto-char (point-min))
-                 (while (search-forward search nil t)
-                   (replace-match replace))))
-   :description "search and replace text in an emacs buffer"
-   :args (list '(:name "buffer"
-                       :type string
-                       :description "the name of the buffer to modify")
-               '(:name "search"
-                       :type string
-                       :description "the text to search for")
-               '(:name "replace"
-                       :type string
-                       :description "the text to replace with"))
-   :category "emacs")
-
-
-
-
-  (gptel-make-tool
-   :name "search_replace_file"
-   :function (lambda (file search replace)
-               (unless (file-exists-p file)
-                 (error "error: file %s does not exist." file))
-               (let ((content (with-temp-buffer
-                                (insert-file-contents file)
-                                (buffer-string))))
-                 (with-temp-file file
-                   (insert (replace-regexp-in-string (regexp-quote search) replace content)))))
-   :description "search and replace text in a file system file"
-   :args (list '(:name "file"
-                       :type string
-                       :description "the path of the file to modify")
-               '(:name "search"
-                       :type string
-                       :description "the text to search for")
-               '(:name "replace"
-                       :type string
-                       :description "the text to replace with"))
-   :category "file")
-
-
-  (defvar ai-gptel-buffer-name nil
-    "The name of the gptel buffer used to send regions. This persists between invocations.")
-
-  (defvar ai-original-region-info nil
-    "Information about the original buffer and region positions.")
-
-  (defun ai-send-region-to-gptel (start end &optional reset-buffer)
-    "Send the selected region, wrapped with delimiters, along with the file name to a gptel buffer and place point after it.
-If RESET-BUFFER is non-nil, ask for the buffer again."
-    (interactive "r\nP")
-    (let* ((region-text (buffer-substring-no-properties start end))
-           (file-name (or (buffer-file-name) "no-file"))
-           (buffer-name (buffer-name))
-           ;; Store the original buffer name and region positions globally
-           (gptel-buffer-name (or (and (not reset-buffer) ai-gptel-buffer-name)
-                                  (setq ai-gptel-buffer-name
-                                        (completing-read "Select gptel buffer: " (mapcar 'buffer-name (buffer-list))))))
-           (prompt "Please review and edit the region using AI tools:\n")
-           (final-text (format "%sIn file: %s\n\n-----BEGIN REGION-----\n%s\n-----END REGION-----\n"
-                               prompt file-name region-text)))
-      (setq ai-original-region-info (list buffer-name start end)) ;; Store region info
-      (unless (get-buffer gptel-buffer-name)
-        (error "Selected buffer does not exist"))
-      (with-current-buffer gptel-buffer-name
-        (goto-char (point-max))
-        (insert final-text)
-        (message "Sent region to gptel buffer."))
-      ;; Check if the gptel buffer window is visible, and select it
-      (let ((window (get-buffer-window gptel-buffer-name)))
-        (if window
-            (select-window window)
-          (switch-to-buffer gptel-buffer-name)))
-      (goto-char (point-max))))
-  (gptel-make-tool
-   :name "replace_region_in_original_buffer" ; Define the name of the tool
-   :function (lambda (new-content) ; Lambda function to perform the replacement
-               ;; Retrieve the stored information about the original region
-               (let ((info ai-original-region-info))
-                 ;; Ensure the original region information is available
-                 (unless info
-                   (error "Error: Original region information not found."))
-                 ;; Extract buffer name and region positions from the stored info
-                 (let ((buffer-name (nth 0 info))
-                       (start (nth 1 info))
-                       (end (nth 2 info)))
-                   ;; Switch to the original buffer and replace the specified region
-                   (with-current-buffer buffer-name
-                     (save-excursion
-                       (goto-char start) ; Move to the start of the region
-                       (delete-region start end) ; Delete the existing region
-                       (insert new-content)))))) ; Insert the new content in its place
-   :description "Replace the original region in the buffer with new content" ; Description of the tool
-   :args (list '(:name "new-content" ; Argument specification for the new content
-                       :type string
-                       :description "The new content to replace the region with"))
-   :category "edit")        ; Categorize the tool as an edit operation
-
-  )
+  :hook (((lean4-info-mode verilog-ts-mode verilog-mode) . eldoc-box-hover-mode)))
 
 (use-package agent-shell
+  :if macos-p
   :ensure t
+  :config
+  (setq agent-shell-anthropic-claude-environment
+      (agent-shell-make-environment-variables
+       "CLAUDE_CODE_EXECUTABLE" "/opt/homebrew/bin/claude"))
   ;; :ensure-system-package
   ;; ;; Add agent installation configs here
   ;; ((claude . "sudo port install claude-code")
   ;;  (claude-agent-acp . "npm install -g @zed-industries/claude-agent-acp"))
   )
 
+;; (use-package neotree
+;;   ;; :hook (neotree-mode . #'turn-off-evil-mode)
+;;   :commands (neotree-toggle)
+;;   :init
+;;   (setq neo-theme (if (display-graphic-p) 'nerd-icons 'arrow))
+;;   (add-hook 'neotree-mode-hook #'turn-off-evil-mode nil t)
+;;   :config
+;;   (message "init.el: loaded neotree")
+;;
+;;   (defun winum-assign-0-to-neotree ()
+;;     (when (string-match-p ".*\\*NeoTree\\*.*" (buffer-name)) 0))
+;;   (setq neo-window-fixed-size nil)
+;;   (with-eval-after-load 'winum
+;;     (add-to-list 'winum-assign-functions #'winum-assign-0-to-neotree))
+;;     )
 
-
-(use-package neotree
-  ;; :hook (neotree-mode . #'turn-off-evil-mode)
-  :commands (neotree-toggle)
-  :init
-  (setq neo-theme (if (display-graphic-p) 'nerd-icons 'arrow))
-  (add-hook 'neotree-mode-hook #'turn-off-evil-mode nil t)
+(use-package treemacs
   :config
-  (message "init.el: loaded neotree")
-
-  (defun winum-assign-0-to-neotree ()
-    (when (string-match-p ".*\\*NeoTree\\*.*" (buffer-name)) 0))
-
+  (defun my-winum-assign-0-to-treemacs ()
+    (when (string-match-p "^ \\*Treemacs" (buffer-name)) 10))
   (with-eval-after-load 'winum
-    (add-to-list 'winum-assign-functions #'winum-assign-0-to-neotree))
-    )
+    (add-to-list 'winum-assign-functions #'my-winum-assign-0-to-treemacs))
+  ;; Skip file-notify and git status on remote paths. Both spawn remote
+  ;; processes (inotifywait/gio, git) per directory expansion and stall the
+  ;; UI. Local trees keep both features.
+  (advice-add 'treemacs--start-watching :before-while
+              (lambda (path &rest _)
+                (not (file-remote-p path))))
+  (when (fboundp 'treemacs--git-status-process)
+    (advice-add 'treemacs--git-status-process :before-while
+                (lambda (path &rest _)
+                  (not (file-remote-p path))))))
+(use-package treemacs-evil
+  :after treemacs)
+
+(use-package org
+  :ensure t
+  :bind (("C-c a" . org-agenda)
+         ("C-c c" . org-capture))
+  :custom
+  ;; Define your primary agenda and note files
+  (org-directory "~/Documents/org/")
+  (org-agenda-files (list "~/Documents/org/tasks.org" "~/Documents/org/projects.org"))
+  (org-default-notes-file "~/Documents/org/notes.org")
+
+  ;; Task Tracking & Workflow
+  (org-todo-keywords '((sequence "TODO(t)" "WAIT(w)" "|" "DONE(d)" "CANCELLED(c)")))
+  (org-log-done 'time)
+  (org-log-into-drawer t)
+
+  ;; Capture Templates for quick input
+  (org-capture-templates
+   '(("t" "Todo" entry (file+headline "~/Documents/org/tasks.org" "Inbox")
+      "* TODO %?\n  %i\n  %U")
+     ("n" "Note" entry (file+headline "~/Documents/org/notes.org" "Notes")
+      "* %?\n  %i\n  %U")))
+
+  ;; Agenda Customization
+  (org-agenda-start-on-weekday 1)
+  (org-agenda-span 'week)
+  (org-agenda-window-setup 'current-window))
+
+(use-package evil-org
+  :after (evil org)
+  :hook (org-mode . evil-org-mode)
+  :config
+  (evil-org-set-key-theme
+   '(navigation insert textobjects additional todo heading return))
+  ;; Reclaim M-<arrow> in org buffers; use M-hjkl (via evil-org) instead.
+  (define-key org-mode-map (kbd "M-<left>")  nil)
+  (define-key org-mode-map (kbd "M-<right>") nil)
+  (define-key org-mode-map (kbd "M-<up>")    nil)
+  (define-key org-mode-map (kbd "M-<down>")  nil))
+
+(use-package org-mac-link
+  :after org)
+
+;; Modern UI upgrade (Requires installing org-modern)
+(use-package org-modern
+  :ensure t
+  :hook (org-mode . org-modern-mode)
+  :hook (org-agenda-finalize . org-modern-agenda))
+
+;; (use-package vterm)
+(use-package ghostel
+  :ensure (:ref "v0.37.0")
+  :hook (after-init . ghostel-comint-global-mode)
+  :config
+  ;; Default configuration
+  (setq ghostel-tramp-shells
+        '(("ssh" login-shell)           ; auto-detect via getent
+          ("scp" login-shell))))
+
+
+(load "~/Code/HOL/tools/editor-modes/emacs/hol-mode")
+(load "~/Code/HOL/tools/editor-modes/emacs/hol-unicode")
 
 ;; Global keybindings:
 (use-package emacs
@@ -1831,6 +1905,7 @@ cancel the use of the current buffer (for special-purpose buffers)."
   (keymap-global-set "C-x r x" #'consult-register)
   (keymap-global-set "C-x r b" #'consult-bookmark)
   (keymap-global-set "C-c k" #'consult-kmacro)
+  (keymap-global-set "C-c w" #'visual-line-mode)
   (keymap-global-set "C-x M-:" #'consult-complex-command)
   (keymap-global-set "C-x 4 b" #'consult-buffer-other-window)
   (keymap-global-set "C-x 5 b" #'consult-buffer-other-frame)
@@ -1888,6 +1963,8 @@ cancel the use of the current buffer (for special-purpose buffers)."
 (add-to-list 'default-frame-alist '(fullscreen . maximized))
 ;;; Load post init
 (setq my-emacs--success t)
+
+(when (not (display-graphic-p)) (xterm-mouse-mode 1))
 
 (provide 'init)
 
