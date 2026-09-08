@@ -558,6 +558,11 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
   ;; Use the remote user's own $PATH so executables like `seg-prompt' are
   ;; found in TRAMP shells, instead of TRAMP's minimal hardcoded path.
   (add-to-list 'tramp-remote-path 'tramp-own-remote-path)
+  ;; ~/.local/bin holds our own userspace installs on myvm (p4-rpc, claude-acp)
+  ;; and is on none of the site login PATHs, so `tramp-own-remote-path' above
+  ;; does not pick it up.  `agent-shell' needs it: acp.el locates the remote ACP
+  ;; agent with `executable-find' against this list.
+  (add-to-list 'tramp-remote-path "/home/mayankm/.local/bin")
   ;; TRAMP defaults to LC_CTYPE='' which perl and friends reject on some
   ;; hosts. Force a valid UTF-8 locale instead.
   (setq tramp-remote-process-environment
@@ -584,6 +589,18 @@ Skips untabify when the buffer uses tab indentation (e.g. Makefiles, Go)."
      (shell-command-switch . "-c")))
   (connection-local-set-profiles
    '(:machine "myvm") 'myvm-tcsh)
+  ;; `tramp-integration' hangs `tramp-recentf-cleanup' on
+  ;; `tramp-cleanup-connection-hook', which purges *every* `recentf-list' entry
+  ;; for a host whenever that host's connection is torn down.  TRAMP tears one
+  ;; down on its own whenever it finds the connection process dead or timed out
+  ;; (VM sleep, dropped SSH, restarted tramp-rpc server), so in practice the
+  ;; whole /rpc:myvm: history gets wiped several times a session and closed
+  ;; remote files silently disappear from `consult-buffer's File source.
+  ;; Stale entries are harmless: `recentf-keep-default-predicate' keeps
+  ;; unconnected remote files as-is, and consult's file sources never stat them.
+  (with-eval-after-load 'tramp-integration
+    (remove-hook 'tramp-cleanup-connection-hook #'tramp-recentf-cleanup)
+    (remove-hook 'tramp-cleanup-all-connections-hook #'tramp-recentf-cleanup-all))
   ) ;; tramp
 
 ;;; tramp-rpc — fast TRAMP backend over a binary (MessagePack) RPC server.
@@ -690,6 +707,18 @@ form that sources the login files, so `tramp-own-remote-path' sees the real PATH
 
   ;; Update recentf-exclude
   (setq recentf-exclude (list "^/\\(?:ssh\\|su\\|sudo\\)?:"))
+
+  ;; `tramp-rpc' installs via elpaca, which loads it asynchronously -- often
+  ;; *after* this `recentf-mode' call, since elpaca-managed packages queue
+  ;; behind `after-init-hook' rather than loading inline like this `:ensure
+  ;; nil' block.  `tramp-file-name-regexp' is built from the registered
+  ;; method list, so until `tramp-rpc' registers "rpc", `file-remote-p'
+  ;; doesn't recognize "/rpc:" paths; `recentf-keep-default-predicate' then
+  ;; treats them as nonexistent local files, and the `recentf-cleanup' that
+  ;; `recentf-auto-cleanup' runs on mode-enable (below) silently drops every
+  ;; "/rpc:" entry loaded from `recentf-save-file'. Keep them unconditionally
+  ;; instead of asking `file-remote-p'.
+  (setq recentf-keep (cons "\\`/rpc:" recentf-keep))
   (recentf-mode)
   ) ;; recentf
 
@@ -957,18 +986,25 @@ form that sources the login files, so `tramp-own-remote-path' sees the real PATH
 
   ;; In remote (TRAMP) buffers, drop the project sources entirely — they call
   ;; projectile-project-root and iterate recentf-list for project membership,
-  ;; both of which are slow over SSH even with non-essential set. Also rebind
-  ;; `default-directory' to a local path so marginalia annotators and other
-  ;; completion machinery don't make TRAMP round-trips while building/showing
-  ;; candidates.
+  ;; both of which are slow over SSH even with non-essential set.  Hidden
+  ;; sources are not exempt: `consult--multi' builds candidates for every
+  ;; enabled source upfront, and narrowing only filters what is already there.
+  ;; Also rebind `default-directory' to a local path so marginalia annotators
+  ;; and other completion machinery don't make TRAMP round-trips while
+  ;; building/showing candidates.
+  ;;
+  ;; Match on the symbol name rather than a literal list: consult renamed these
+  ;; from `consult--source-project-*' to `consult-source-project-*', which
+  ;; silently turned an earlier `memq' version of this advice into a no-op.
   (advice-add 'consult-buffer :around
               (lambda (orig &rest args)
                 (if (file-remote-p default-directory)
                     (let ((consult-buffer-sources
                            (seq-remove (lambda (src)
-                                         (memq src '(consult--source-project-buffer
-                                                     consult--source-project-buffer-hidden
-                                                     consult--source-project-recent-file)))
+                                         (and (symbolp src)
+                                              (string-match-p
+                                               "\\`consult-+source-project"
+                                               (symbol-name src))))
                                        consult-buffer-sources))
                           (default-directory temporary-file-directory)
                           (non-essential t))
@@ -1312,6 +1348,74 @@ form that sources the login files, so `tramp-own-remote-path' sees the real PATH
 ;; is unaffected; this only applies when `default-directory' is remote.
 (setq p4-executable-remote "/home/mayankm/.local/bin/p4-rpc")
 
+;; `p4-edit' (and add/delete/revert/reopen/lock/unlock) finishes by running
+;; `p4-refresh-buffer' -> `revert-buffer' -> `after-find-file', which recomputes
+;; `buffer-read-only' from `file-writable-p'.  Two problems on a remote file:
+;;
+;;  1. That check is a lie.  tramp-rpc keeps its own `file.stat' cache
+;;     (`tramp-rpc--file-stat-cache', 300s TTL) *in addition to* tramp's
+;;     property cache, and its `process-file' handler invalidates only
+;;     `default-directory' itself -- and there only the exact hash keys for that
+;;     path and its parent, never the files inside it.  So p4 has already
+;;     chmod'ed the file to 0664 on the host, yet `file-attributes' keeps
+;;     reporting the pre-edit r--r--r-- for up to 5 minutes and the buffer stays
+;;     read-only.  Flushing tramp's own properties is not enough: they get
+;;     recomputed from the stale rpc stat cache.  (`file-writable-p',
+;;     `file-modes' and `verify-visited-file-modtime' all route through
+;;     `file-attributes', so all three need the flush.)
+;;  2. The revert is pure waste for a command that only flips the write bit:
+;;     re-reading a 4MB .sv over the rpc link and re-parsing it with tree-sitter
+;;     costs ~45s.
+;;
+;; So: flush the file's cache entries, then -- for the commands that cannot
+;; change file content, and only while the file on disk still matches what the
+;; buffer read -- sync `buffer-read-only' instead of reverting.  Everything else
+;; (`p4 revert', `p4 delete', a modified buffer, a file that changed underneath,
+;; a local file) falls through to p4.el's revert.
+(defvar my-p4--content-preserving-command nil
+  "Non-nil while running a p4 command that cannot change file content.
+Such a command needs only `buffer-read-only' resynced, not a revert.")
+
+(defun my-p4-flush-remote-file-caches ()
+  "Invalidate TRAMP caches for the visited remote file.
+Needed before any `file-attributes'-derived check that must see
+what a p4 command just did to the file on the host."
+  (when-let* ((file buffer-file-name)
+              ((file-remote-p file)))
+    (when (fboundp 'tramp-rpc--invalidate-cache-for-path)
+      (ignore-errors (tramp-rpc--invalidate-cache-for-path file)))
+    (ignore-errors
+      (with-parsed-tramp-file-name file nil
+        (tramp-flush-file-properties v localname)))))
+
+(defun my-p4-refresh-buffer-remote (orig)
+  "Refresh a remote file buffer after a p4 command, avoiding a needless re-read.
+ORIG is `p4-refresh-buffer', which is called for anything that
+might genuinely need new content."
+  (if (not (and buffer-file-name (file-remote-p buffer-file-name)))
+      (funcall orig)
+    (my-p4-flush-remote-file-caches)
+    (if (and my-p4--content-preserving-command
+             (not (buffer-modified-p))
+             (verify-visited-file-modtime))
+        ;; Same bytes on disk, only the mode changed.  `read-only-mode' rather
+        ;; than `setq': it also runs `read-only-mode-hook' and leaves View mode
+        ;; consistent, as `after-find-file' would have.
+        (read-only-mode (if (file-writable-p buffer-file-name) -1 1))
+      (funcall orig))))
+(advice-add 'p4-refresh-buffer :around #'my-p4-refresh-buffer-remote)
+
+(defun my-p4-content-preserving-command (orig &rest args)
+  "Call ORIG with ARGS, marking it as unable to change file content."
+  (let ((my-p4--content-preserving-command t))
+    (apply orig args)))
+;; These are all in `p4-synchronous-commands', and `p4-process-restart' forces
+;; synchronous execution when `default-directory' is remote, so the refresh
+;; callback runs inside this dynamic extent.  Should that ever stop holding, the
+;; flag is merely nil at refresh time and we fall back to p4.el's revert.
+(dolist (cmd '(p4-edit p4-add p4-lock p4-unlock p4-reopen))
+  (advice-add cmd :around #'my-p4-content-preserving-command))
+
 (use-package evil
   :init
   (setq evil-want-integration t)
@@ -1377,7 +1481,14 @@ form that sources the login files, so `tramp-own-remote-path' sees the real PATH
 
   ;;Change effect of entering into normal state
   (defun my-evil-normal-state (&rest args)
-    (when mark-active
+    ;; `evil-normal-state' is also called with a negative arg to *leave*
+    ;; normal state -- notably from `evil-visual-state' itself, via
+    ;; `evil-change-state'.  Recursing into `evil-visual-state' there makes
+    ;; the visual selection get built twice, and since the backward-region
+    ;; branch of `evil-visual-state' contracts the range each time, the last
+    ;; character is dropped (e.g. `C-x h', which leaves point at point-min).
+    ;; Only act when normal state was actually entered.
+    (when (and (evil-normal-state-p) mark-active)
       (evil-visual-state)))
   (advice-add 'evil-normal-state :after #'my-evil-normal-state)
 
@@ -1479,11 +1590,19 @@ form that sources the login files, so `tramp-own-remote-path' sees the real PATH
 ;;   )
 
 ;;; HOL4
-;; (use-package sml-mode
-;;   :mode ("\\.sml\\'" . sml-mode)
-;;   :config
-;;   (load "~/Code/HOL/tools/hol-mode")
-;;   (load "~/Code/HOL/tools/hol-unicode"))
+;; Deliberately not loaded.  HOL4's two editor-mode files bind their keys in the
+;; *global* map at load time -- unconditionally, with no minor mode to turn off:
+;;  - hol-unicode.el inserts characters from C-S-a (α), C-S-c, C-S-i, C-S-q,
+;;    C-S-u and ~40 more, and claims C-S-f, C-S-p, C-<, C->, C-" and a dozen
+;;    other keys as prefix maps.  C-S-a is the one that hurt: it shadowed
+;;    shift-selection to the start of the line.
+;;  - hol-mode.el takes M-h (`mark-paragraph') and C-M-h (`mark-defun'), and
+;;    adds a menu-bar entry that is always present.
+;; HOL Light (elisp/hol-light.el, below) is an unrelated package and does none
+;; of this.  If HOL4 is wanted again, load these from a mode hook and put their
+;; commands in a mode-local map rather than at top level.
+;; (load "~/Code/HOL/tools/editor-modes/emacs/hol-mode")
+;; (load "~/Code/HOL/tools/editor-modes/emacs/hol-unicode")
 
 ;;; OCaml
 
@@ -1719,18 +1838,143 @@ test rather than a bare `eldoc-box-hover-mode'."
 (use-package eldoc-box
   :hook (((lean4-info-mode verilog-ts-mode verilog-mode) . eldoc-box-hover-mode)))
 
+(defvar my-agent-shell-myvm-plugin-dirs
+  '("/home/mayankm/.genie/default/plugins/fv-debug-agent/4.0"
+    "/home/mayankm/.genie/default/plugins/sv-analyzer/3.7.0"
+    "/org/seg/services/genie/all/components/appstore/disks/disk1/prod/FE/default/plugins/raven/v0.1.0")
+  "Genie plugin directories to load in remote Claude shells on myvm.
+These are what `genie-claude --plugin fv-debug-agent --plugin sv-analyzer
+--plugin raven' passes to claude as `--plugin-dir'.  Refresh with
+`genie-claude --plugin ... --show-path' when a plugin version changes.")
+
+(defun my-agent-shell-add-genie-plugins (config)
+  "Load `my-agent-shell-myvm-plugin-dirs' in CONFIG when starting on myvm.
+Claude's `--plugin-dir' flag corresponds to the Claude Agent SDK's `plugins'
+option, which the ACP adapter reads out of `_meta.claudeCode.options' -- so it
+travels as agent-shell `:session-meta'.  The plugin list must be a vector: acp.el
+serialises with `json-serialize', which renders a list of conses as a JSON
+object, not an array."
+  (if (equal "myvm" (file-remote-p default-directory 'host))
+      (map-insert
+       config :session-meta
+       `((claudeCode
+          . ((options
+              . ,(cons `(plugins
+                         . ,(vconcat (mapcar (lambda (dir)
+                                               `((type . "local") (path . ,dir)))
+                                             my-agent-shell-myvm-plugin-dirs)))
+                       ;; Keep whatever options the package already set (the
+                       ;; thinking-display workaround); we only add to them.
+                       (map-nested-elt (map-elt config :session-meta)
+                                       '(claudeCode options))))))))
+    config))
+
+(defun my-shell-maker-skip-curl-check (orig &rest args)
+  "Return t in `agent-shell' buffers, otherwise call ORIG with ARGS.
+`shell-maker' gates every submission on curl >= 7.76, because that is how its
+HTTP-based shells (chatgpt-shell and friends) reach their backends.  agent-shell
+does not use curl at all -- it speaks ACP over a pipe.  The check runs
+`shell-command-to-string', which honours `default-directory', so in a TRAMP
+agent-shell buffer it probes the *remote* curl; myvm ships 7.61.1, so every
+prompt died with \"You need curl version 7.76 or newer.\" before being sent.
+Skipping it also saves a remote round trip per prompt."
+  (if (derived-mode-p 'agent-shell-mode)
+      t
+    (apply orig args)))
+
+(defun my-agent-shell-local-fs-only (orig &rest args)
+  "Withhold client-side file capabilities from *remote* agent shells.
+`agent-shell-text-file-capabilities' makes agent-shell advertise ACP's
+`fs/read_text_file' / `fs/write_text_file', which invites the agent to route its
+Read/Edit tools back through Emacs instead of touching the filesystem itself.
+Locally that is a win: the agent then sees unsaved buffer text.  Over TRAMP it
+is the opposite -- `agent-shell--on-fs-read-text-file-request' answers with a
+plain `insert-file-contents' on the remote name, and TRAMP is synchronous, so
+any file the agent read that way would freeze the UI for a round trip (measured
+at ~1.3s for a 5MB include on myvm).  The remote agent already runs on the
+machine holding the files, so its own tools are both faster and non-blocking.
+Cost: it reads what is on disk, so unsaved buffer changes are invisible to it.
+
+This is a precaution, not a bug fix: an ACP traffic log of a full remote turn
+showed the agent issuing no `fs/*' requests at all, so it may never have taken
+that route here.  The freezing this was first written for turned out to be
+remote transcript writes -- see `my-agent-shell-transcript-file-path'."
+  (let* ((buf (plist-get args :shell-buffer))
+         (dir (if (buffer-live-p buf)
+                  (buffer-local-value 'default-directory buf)
+                default-directory)))
+    (if (file-remote-p dir)
+        (let ((agent-shell-text-file-capabilities nil))
+          (apply orig args))
+      (apply orig args))))
+
+(defun my-agent-shell-transcript-file-path ()
+  "Return a transcript path, kept on local disk for remote shells.
+agent-shell appends to the transcript after nearly every `session/update', with
+`write-region ... APPEND', and `agent-shell--default-transcript-file-path' puts
+it under the shell's cwd -- which for a TRAMP shell is remote.  Each append is
+then a remote `write-region', and TRAMP surrounds every one of those with
+attribute-preservation round trips (`file-acl', `set-file-acl', selinux get/set,
+`file-modes', `tramp-set-file-uid-gid', `file-truename', `file-symlink-p',
+`lock-file'/`unlock-file') regardless of how few bytes are being appended.
+
+Measured on myvm with a counter on `tramp-file-name-handler': a single prompt
+produced 373 appends costing 302s inside `write-region' and ~640s of remote
+traffic overall, all of it blocking redisplay.  That is what froze the UI on
+every tool call.  Local shells keep the default project-relative location.
+
+The mirror path is <cache>/transcripts/<host>/<last-3-dirs>-<hash>/<stamp>.md.
+The hash is over the whole remote directory so identically-named leaves in
+different workspaces (pipN.Wtmp) do not collide."
+  (if-let* ((host (file-remote-p default-directory 'host)))
+      (let* ((localname (or (file-remote-p default-directory 'localname) "/"))
+             (parts (seq-remove #'string-empty-p (split-string localname "/")))
+             (tail (replace-regexp-in-string
+                    "[^A-Za-z0-9]+" "-" (string-join (last parts 3) "-")))
+             (dir (agent-shell-cache-dir
+                   "transcripts" host
+                   (concat tail "-" (substring (md5 localname) 0 8)))))
+        (expand-file-name (format-time-string "%F-%H-%M-%S.md") dir))
+    (agent-shell--default-transcript-file-path)))
+
 (use-package agent-shell
   :if macos-p
   :ensure t
   :config
-  (setq agent-shell-anthropic-claude-environment
-      (agent-shell-make-environment-variables
-       "CLAUDE_CODE_EXECUTABLE" "/opt/homebrew/bin/claude"))
-  ;; :ensure-system-package
-  ;; ;; Add agent installation configs here
-  ;; ((claude . "sudo port install claude-code")
-  ;;  (claude-agent-acp . "npm install -g @zed-industries/claude-agent-acp"))
-  )
+  ;; `claude-acp' is a per-host launcher script (~/.local/bin/claude-acp, both
+  ;; here and on myvm).  acp.el spawns the ACP agent through TRAMP whenever
+  ;; `default-directory' is remote, so one bare command name drives the local
+  ;; agent and the one on myvm, each exporting its own CLAUDE_CODE_EXECUTABLE.
+  ;; It must stay a bare name, not an absolute path: agent-shell pre-flights the
+  ;; command with a *local* `executable-find' before acp.el's remote-aware one.
+  (setq agent-shell-anthropic-claude-acp-command '("claude-acp"))
+  ;; Start the agent in the directory of the buffer it was invoked from, rather
+  ;; than `agent-shell-cwd''s default of the project root.  The root here is only
+  ;; found as a project.el *transient* entry -- `vc-ignore-dir-regexp' above
+  ;; swallows all TRAMP paths, so `project-try-vc' never resolves a remote root
+  ;; -- which makes the default cwd depend on session state.  Trade-off: the
+  ;; agent sees only this subtree unless given `--add-dir', and a CLAUDE.md at
+  ;; the workspace root is no longer picked up as project memory.
+  (setq agent-shell-cwd-function (lambda () default-directory))
+  ;; Keep transcripts off the remote filesystem; see the function's docstring.
+  (setq agent-shell-transcript-file-path-function
+        #'my-agent-shell-transcript-file-path)
+  ;; Translate between TRAMP file names and the plain paths the remote agent
+  ;; speaks.  agent-shell runs this both on the cwd it sends out and on the
+  ;; paths the agent sends back, so pick the direction by whether the path
+  ;; already carries a TRAMP prefix.
+  (setq agent-shell-path-resolver-function
+        (lambda (path)
+          (cond ((file-remote-p path) (file-remote-p path 'localname))
+                ((file-remote-p default-directory)
+                 (concat (file-remote-p default-directory) path))
+                (t path))))
+  (advice-add 'agent-shell-anthropic-make-claude-code-config
+              :filter-return #'my-agent-shell-add-genie-plugins)
+  (advice-add 'shell-maker--curl-version-supported
+              :around #'my-shell-maker-skip-curl-check)
+  (advice-add 'agent-shell--initiate-handshake
+              :around #'my-agent-shell-local-fs-only))
 
 ;; (use-package neotree
 ;;   ;; :hook (neotree-mode . #'turn-off-evil-mode)
@@ -1821,13 +2065,15 @@ test rather than a bare `eldoc-box-hover-mode'."
   :hook (after-init . ghostel-comint-global-mode)
   :config
   ;; Default configuration
+  ;; `rpc' isn't among ghostel's built-in methods, so without an entry here it
+  ;; falls through to the connection-local `shell-file-name' -- which is
+  ;; deliberately /bin/sh for myvm (see the `myvm-tcsh' profile above) -- and
+  ;; remote terminals land in sh instead of tcsh.
   (setq ghostel-tramp-shells
         '(("ssh" login-shell)           ; auto-detect via getent
-          ("scp" login-shell))))
+          ("scp" login-shell)
+          ("rpc" login-shell))))
 
-
-(load "~/Code/HOL/tools/editor-modes/emacs/hol-mode")
-(load "~/Code/HOL/tools/editor-modes/emacs/hol-unicode")
 
 ;; Global keybindings:
 (use-package emacs
